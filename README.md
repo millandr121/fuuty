@@ -1,63 +1,64 @@
-# ⚽ PIXEL FOOTY
+# ⚽ NIDHOGG FOOTY
 
-Online multiplayer pixel-guy soccer. Up to **3 players per lobby**, NPCs fill the
-rest of a **3v3**, 6-minute matches, with arcade mechanics: juggling, juggle
-passes, bicycle kicks, slide tackles and body tackles.
+A side-on **tug-of-war football** game — *Nidhogg, but soccer*. Push the ball to
+the far goal; the camera follows the **ball** (wherever the ball goes, the screen
+goes). Win it back by matching its **height** in a stance duel.
 
-Top-down pitch with a real **ball-height (z) axis** — like the classic arcade
-soccer games — so lobs, juggles and bicycle kicks actually arc through the air
-and cast shadows.
+Online multiplayer, **1v1 or 2v2**, with NPCs filling any empty slots. **First to
+5 goals wins.**
 
 ## Run it
 
 ```bash
 npm install
-npm start
+npm start          # http://localhost:3000
 ```
 
-Then open **http://localhost:3000** in a few browser tabs (or share the lobby
-code across machines on the same network).
+Open in a couple of browser tabs, or share the lobby code across machines.
 
-- **Quick Play** — start instantly against CPUs (great for tuning mechanics).
-- **Create Lobby** — get a 4-letter code, share it, hit START. Empty slots fill
-  with CPUs.
-- **Join** — enter a friend's code (max 3 humans per lobby).
+- **Quick Play** — instant 1v1 vs a CPU.
+- **Create Lobby** — pick 1v1 / 2v2, share the 4-letter code, hit START. Empty
+  slots fill with CPUs.
+- **Join** — enter a friend's code.
 
 ## Controls
 
-| Key | No ball | Dribbling | Juggling |
-|-----|---------|-----------|----------|
-| **Move** | `WASD` / Arrows | — | — |
-| **Space** | Slide tackle (steals from a dribbler) | Shoot | Juggle pass (pop the ball up) |
-| **Shift** | Body tackle (steals from a juggler) | Start juggling | **Bicycle kick** (jump + smash down) |
+| Key | Action |
+|-----|--------|
+| **A / D** (or ← / →) | move left / right |
+| **W** | jump |
+| **↑ / ↓** | change **stance** — feet ↔ knee ↔ head (a raised stance settles back down) |
+| **Space** | **act at your stance** |
+| **Shift** | **bicycle kick** (desperate forward smash) |
 
-Touch controls (on-screen stick + A/B buttons) appear automatically on phones/tablets.
+### Stances are everything
+Your stance is the **height of the ball** when you control it, and the **height
+you challenge at** when you don't:
 
-### Combos
-- **Shift → Shift** while you have the ball: flick it up to juggle, then launch a
-  bicycle kick that fires downward toward goal.
-- **Space** while juggling: pop the ball into the air to escape pressure, buy
-  time, or set up a teammate / a bicycle kick.
-- **Body tackle** beats a juggler; **slide tackle** beats a dribbler. Pick the
-  right one.
+| Stance | With the ball | Without the ball |
+|--------|---------------|------------------|
+| **Low** (feet) | dribble · ground shot | slide tackle (running) / low block (still) |
+| **Mid** (knee) | knee juggle · volley | charging flying leg-kick |
+| **High** (head)| head juggle · header | header duel |
+
+You only win the ball if your challenge **meets the ball at its height**. Slide
+at a head-height juggler and you'll whiff; raise to a header and you take it.
+Juggle the ball up to dodge a low slide, or **bicycle kick** to smash past a
+defender when you're cornered.
 
 ## How it works
 
-- **Server-authoritative** (`server.js`): a Node + `ws` server runs the whole
-  simulation — physics, possession, tackles, goals and NPC AI — at 30 Hz and
-  broadcasts snapshots. Clients send only input. This keeps everyone in sync and
-  makes it easy to tune mechanics in one place.
-- **Client** (`public/client.js`): HTML5 canvas renderer with snapshot
-  interpolation, pixel-rect players with squash/stretch animations, shadows for
-  ball/jump height, and a HUD (score + 6:00 clock).
-- **Shared constants** (`shared/constants.js`): one source of truth for field
-  size, physics and tuning, loaded by both Node and the browser.
-
-The match is **6 minutes**. Yellow attacks right, Blue attacks left. Most goals
-wins.
+- **Server-authoritative** (`server.js`): a Node + `ws` server runs the entire
+  side-on simulation (platformer physics, stance duels, possession, goals, and
+  NPC AI) at 30 Hz and broadcasts snapshots; clients send only input.
+- **Client** (`public/client.js`): HTML5 canvas. The camera tracks the ball
+  across a long pitch (parallax crowd + mowed stripes), pixel players animate per
+  stance/state (run, knee-juggle, header, slide, flying kick, bicycle, faceplant),
+  with snapshot interpolation.
+- **Shared tuning** (`shared/constants.js`): one source of truth for both Node and
+  the browser — pitch size, physics, stance heights, shot power, duel reach.
 
 ## Tuning
 
-Almost everything lives in `shared/constants.js` — speeds, gravity, shot power,
-tackle reach, juggle heights, match length, team size. NPC behaviour is in the
-`aiThink` function in `server.js`.
+Everything lives in `shared/constants.js` (physics, stances, shot/duel numbers,
+`GOAL_TARGET`, `WORLD_W`). NPC behaviour is the `aiThink` function in `server.js`.

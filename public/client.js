@@ -1,414 +1,320 @@
 'use strict';
 /* global GAME */
 const C = GAME;
-
-// ---------------------------------------------------------------------------
-// DOM
-// ---------------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const screens = { menu: $('menu'), lobby: $('lobby'), game: $('game'), over: $('over') };
-function show(name) {
-  for (const k in screens) screens[k].classList.toggle('hidden', k !== name);
-}
+const show = (n) => { for (const k in screens) screens[k].classList.toggle('hidden', k !== n); };
 
-const cv = $('cv');
-const ctx = cv.getContext('2d');
-ctx.imageSmoothingEnabled = false;
+const cv = $('cv'); const ctx = cv.getContext('2d'); ctx.imageSmoothingEnabled = false;
 
 // ---------------------------------------------------------------------------
-// Networking
+// networking
 // ---------------------------------------------------------------------------
-let ws = null;
-let myEnt = null;
-let snaps = [];           // interpolation buffer: {t(recv), data}
-const RENDER_DELAY = 90;  // ms behind to interpolate smoothly
-let latest = null;        // most recent snapshot data
-let gameOverData = null;
+let ws = null, myEnt = null, snaps = [], latest = null;
+const RENDER_DELAY = 90;
+let createdMode = 2;
 
 function connect(then) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
   ws.onopen = () => then && then();
   ws.onclose = () => { $('menuErr').textContent = 'Disconnected.'; };
-  ws.onmessage = (ev) => handleMsg(JSON.parse(ev.data));
+  ws.onmessage = (ev) => handle(JSON.parse(ev.data));
 }
+const send = (o) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
 
-function sendRaw(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
-
-function handleMsg(m) {
+function handle(m) {
   switch (m.type) {
-    case 'lobby':
-      myCode = m.code;
-      renderLobby(m);
-      show('lobby');
-      break;
-    case 'error':
-      $('menuErr').textContent = m.msg;
-      break;
-    case 'start':
-      myEnt = null; snaps = []; latest = null; gameOverData = null;
-      show('game'); resize();
-      break;
-    case 'state':
-      myEnt = m.youEnt;
-      latest = m;
-      snaps.push({ t: performance.now(), data: m });
-      if (snaps.length > 12) snaps.shift();
-      break;
-    case 'gameover':
-      gameOverData = m;
-      showGameOver(m);
-      break;
+    case 'lobby': renderLobby(m); show('lobby'); break;
+    case 'error': $('menuErr').textContent = m.msg; break;
+    case 'start': myEnt = null; snaps = []; latest = null; show('game'); break;
+    case 'state': myEnt = m.youEnt; latest = m; snaps.push({ t: performance.now(), d: m }); if (snaps.length > 12) snaps.shift(); break;
+    case 'gameover': showOver(m); break;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Menu / lobby wiring
+// menu / lobby
 // ---------------------------------------------------------------------------
-let myCode = null;
 const nameInput = $('nameInput');
 nameInput.value = localStorage.getItem('pf_name') || '';
-function myName() {
-  const n = (nameInput.value || 'player').trim().slice(0, 12) || 'player';
-  localStorage.setItem('pf_name', n);
-  return n;
-}
+const myName = () => { const n = (nameInput.value || 'player').trim().slice(0, 12) || 'player'; localStorage.setItem('pf_name', n); return n; };
 
-$('btnSolo').onclick = () => connect(() => sendRaw({ type: 'solo', name: myName() }));
-$('btnCreate').onclick = () => connect(() => sendRaw({ type: 'create', name: myName() }));
+$('btnSolo').onclick = () => connect(() => send({ type: 'solo', name: myName() }));
+$('btnCreate').onclick = () => connect(() => send({ type: 'create', name: myName(), perSide: createdMode }));
 $('btnJoin').onclick = () => {
   const code = ($('codeInput').value || '').toUpperCase().trim();
   if (code.length !== 4) { $('menuErr').textContent = 'Enter a 4-letter code'; return; }
-  connect(() => sendRaw({ type: 'join', code, name: myName() }));
+  connect(() => send({ type: 'join', code, name: myName() }));
 };
-$('btnStart').onclick = () => sendRaw({ type: 'start' });
+$('btnStart').onclick = () => send({ type: 'start' });
 $('btnLeave').onclick = () => { if (ws) ws.close(); show('menu'); };
 $('btnAgain').onclick = () => { if (ws) ws.close(); show('menu'); };
+$('mode1').onclick = () => setMode(1);
+$('mode2').onclick = () => setMode(2);
+function setMode(m) { send({ type: 'mode', perSide: m }); }
 
 function renderLobby(m) {
   $('lobbyCode').textContent = m.code;
-  const ul = $('playerList');
-  ul.innerHTML = '';
+  $('lobbyMode').textContent = `${m.perSide}v${m.perSide}`;
+  $('mode1').classList.toggle('on', m.perSide === 1);
+  $('mode2').classList.toggle('on', m.perSide === 2);
+  const ul = $('playerList'); ul.innerHTML = '';
   m.players.forEach((p, i) => {
     const li = document.createElement('li');
-    const team = i % 2 === 0 ? 'YELLOW' : 'BLUE';
-    li.innerHTML = `<span>${escapeHtml(p.name)}</span><span class="tagteam">${team}</span>`;
+    li.innerHTML = `<span>${esc(p.name)}</span><span class="tagteam">${i % 2 === 0 ? 'YELLOW' : 'BLUE'}</span>`;
     ul.appendChild(li);
   });
-  for (let i = m.players.length; i < 3; i++) {
-    const li = document.createElement('li');
-    li.style.opacity = .45;
-    li.innerHTML = `<span>— open —</span><span class="tagteam">CPU fills</span>`;
-    ul.appendChild(li);
+  for (let i = m.players.length; i < m.perSide * 2; i++) {
+    const li = document.createElement('li'); li.style.opacity = .45;
+    li.innerHTML = `<span>— open —</span><span class="tagteam">CPU</span>`; ul.appendChild(li);
   }
 }
-function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
-
-function showGameOver(m) {
-  show('over');
-  const [a, b] = m.score;
-  $('overScore').textContent = `${a} - ${b}`;
-  $('overTitle').textContent = a === b ? 'DRAW!' : (a > b ? 'YELLOW WINS' : 'BLUE WINS');
-}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function showOver(m) { show('over'); $('overTitle').textContent = (m.winner === 0 ? 'YELLOW WINS' : 'BLUE WINS'); $('overScore').textContent = `${m.score[0]} - ${m.score[1]}`; }
 
 // ---------------------------------------------------------------------------
-// Input
+// input
 // ---------------------------------------------------------------------------
-const input = { up: false, down: false, left: false, right: false, primary: false, special: false };
+const input = { left: false, right: false, jump: false, up: false, down: false, act: false, bike: false };
 let lastSent = '';
-function pushInput() {
-  const s = JSON.stringify(input);
-  if (s !== lastSent) { lastSent = s; sendRaw(Object.assign({ type: 'input' }, input)); }
-}
-
+function pushInput() { const s = JSON.stringify(input); if (s !== lastSent) { lastSent = s; send(Object.assign({ type: 'input' }, input)); } }
 const keyMap = {
-  KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
   KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
-  Space: 'primary', ShiftLeft: 'special', ShiftRight: 'special',
+  KeyW: 'jump', KeyJ: 'jump',
+  ArrowUp: 'up', ArrowDown: 'down', KeyS: 'down',
+  Space: 'act', ShiftLeft: 'bike', ShiftRight: 'bike',
 };
-window.addEventListener('keydown', (e) => {
-  const k = keyMap[e.code];
-  if (!k) return;
+addEventListener('keydown', (e) => {
+  const k = keyMap[e.code]; if (!k) return;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   if (!input[k]) { input[k] = true; pushInput(); }
 });
-window.addEventListener('keyup', (e) => {
-  const k = keyMap[e.code];
-  if (!k) return;
-  if (input[k]) { input[k] = false; pushInput(); }
-});
+addEventListener('keyup', (e) => { const k = keyMap[e.code]; if (!k) return; if (input[k]) { input[k] = false; pushInput(); } });
 
-// touch controls
-const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-if (isTouch) setupTouch();
+// touch
+if ('ontouchstart' in window || navigator.maxTouchPoints > 0) setupTouch();
 function setupTouch() {
   $('touch').classList.remove('hidden');
-  const stick = $('stick'), nub = $('nub');
-  let sid = null, cx = 0, cy = 0;
-  function setDir(dx, dy) {
-    const dead = 14;
-    input.up = dy < -dead; input.down = dy > dead;
-    input.left = dx < -dead; input.right = dx > dead;
-    const mag = Math.min(40, Math.hypot(dx, dy));
-    const a = Math.atan2(dy, dx);
-    nub.style.left = (35 + Math.cos(a) * mag) + 'px';
-    nub.style.top = (35 + Math.sin(a) * mag) + 'px';
-    pushInput();
-  }
-  stick.addEventListener('touchstart', (e) => {
-    const t = e.changedTouches[0]; sid = t.identifier;
-    const r = stick.getBoundingClientRect(); cx = r.left + r.width / 2; cy = r.top + r.height / 2;
-    setDir(t.clientX - cx, t.clientY - cy); e.preventDefault();
-  }, { passive: false });
-  stick.addEventListener('touchmove', (e) => {
-    for (const t of e.changedTouches) if (t.identifier === sid) setDir(t.clientX - cx, t.clientY - cy);
-    e.preventDefault();
-  }, { passive: false });
-  const end = (e) => {
-    for (const t of e.changedTouches) if (t.identifier === sid) {
-      sid = null; input.up = input.down = input.left = input.right = false;
-      nub.style.left = '35px'; nub.style.top = '35px'; pushInput();
-    }
-  };
-  stick.addEventListener('touchend', end); stick.addEventListener('touchcancel', end);
-  const btn = (el, key) => {
+  const bind = (id, key) => { const el = $(id); if (!el) return;
     el.addEventListener('touchstart', (e) => { input[key] = true; pushInput(); e.preventDefault(); }, { passive: false });
     el.addEventListener('touchend', (e) => { input[key] = false; pushInput(); e.preventDefault(); }, { passive: false });
+    el.addEventListener('touchcancel', (e) => { input[key] = false; pushInput(); }, { passive: false });
   };
-  btn($('btnA'), 'primary'); btn($('btnB'), 'special');
+  bind('tLeft', 'left'); bind('tRight', 'right'); bind('tJump', 'jump');
+  bind('tUp', 'up'); bind('tDown', 'down'); bind('tAct', 'act'); bind('tBike', 'bike');
 }
-
-function resize() {
-  // canvas keeps internal 960x600; CSS scales it. nothing needed but kept for hooks.
-}
-window.addEventListener('resize', resize);
 
 // ---------------------------------------------------------------------------
-// Interpolation
+// interpolation
 // ---------------------------------------------------------------------------
-function lerp(a, b, t) { return a + (b - a) * t; }
-function lerpAngle(a, b, t) {
-  let d = b - a;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
+const lerp = (a, b, t) => a + (b - a) * t;
+function view() {
+  if (!snaps.length) return latest;
+  const rt = performance.now() - RENDER_DELAY;
+  let o = snaps[0], n = snaps[snaps.length - 1];
+  for (let i = 0; i < snaps.length - 1; i++) if (snaps[i].t <= rt && snaps[i + 1].t >= rt) { o = snaps[i]; n = snaps[i + 1]; break; }
+  const span = n.t - o.t, t = span > 0 ? Math.max(0, Math.min(1, (rt - o.t) / span)) : 1;
+  const A = o.d, B = n.d, byA = {}; A.players.forEach((p) => byA[p.id] = p);
+  const players = B.players.map((pb) => { const pa = byA[pb.id] || pb;
+    return { id: pb.id, team: pb.team, name: pb.name, npc: pb.npc, f: pb.f, st: pb.st, s: pb.s, a: pb.a,
+      x: lerp(pa.x, pb.x, t), h: lerp(pa.h, pb.h, t) }; });
+  const ball = { x: lerp(A.ball.x, B.ball.x, t), h: lerp(A.ball.h, B.ball.h, t), owner: B.ball.owner, stance: B.ball.stance };
+  return { players, ball, score: B.score, flash: B.flash, kickoff: B.kickoff, target: B.target };
 }
 
-function interpState() {
-  if (snaps.length === 0) return latest;
-  const renderT = performance.now() - RENDER_DELAY;
-  // find two snaps around renderT
-  let older = snaps[0], newer = snaps[snaps.length - 1];
-  for (let i = 0; i < snaps.length - 1; i++) {
-    if (snaps[i].t <= renderT && snaps[i + 1].t >= renderT) { older = snaps[i]; newer = snaps[i + 1]; break; }
+// ---------------------------------------------------------------------------
+// rendering
+// ---------------------------------------------------------------------------
+const GROUND = C.GROUND_PX;
+const TEAM = [{ shirt: '#ffd23f', dark: '#b8860b', short: '#3a2c00' }, { shirt: '#46a8ff', dark: '#1d6fbf', short: '#06294a' }];
+const SKIN = '#f0bd92';
+let camX = C.WORLD_W / 2;
+
+function draw(time) {
+  requestAnimationFrame(draw);
+  if (screens.game.classList.contains('hidden')) return;
+  const v = view(); if (!v) return;
+
+  // camera follows the ball (priority)
+  const targetCam = Math.max(C.VIEW_W / 2, Math.min(C.WORLD_W - C.VIEW_W / 2, v.ball.x));
+  camX += (targetCam - camX) * 0.12;
+
+  drawBackground();
+  drawPitch();
+  drawGoal(0); drawGoal(C.WORLD_W);
+
+  // players, then the ball on top
+  for (const p of v.players) drawPlayer(p, p.id === myEnt, time);
+  drawBall(v.ball, time);
+
+  drawHUD(v);
+}
+
+const sx = (x) => Math.round(x - camX + C.VIEW_W / 2);
+
+function drawBackground() {
+  // sky
+  const g = ctx.createLinearGradient(0, 0, 0, GROUND);
+  g.addColorStop(0, '#13243b'); g.addColorStop(1, '#26415f');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, C.VIEW_W, C.VIEW_H);
+  // parallax stars/lights
+  ctx.fillStyle = 'rgba(255,255,255,.15)';
+  for (let i = 0; i < 40; i++) {
+    const wx = (i * 137.5) % C.WORLD_W;
+    const px = sx(wx) * 0.6 + 200;
+    const x = ((px % C.VIEW_W) + C.VIEW_W) % C.VIEW_W;
+    ctx.fillRect(x, 30 + (i * 53) % 160, 2, 2);
   }
-  const span = newer.t - older.t;
-  const t = span > 0 ? Math.max(0, Math.min(1, (renderT - older.t) / span)) : 1;
-  const A = older.data, B = newer.data;
-  // build interpolated view based on B's roster
-  const byIdA = {};
-  A.players.forEach((p) => (byIdA[p.id] = p));
-  const players = B.players.map((pb) => {
-    const pa = byIdA[pb.id] || pb;
-    return {
-      id: pb.id, team: pb.team, name: pb.name, npc: pb.npc, s: pb.s, a: pb.a,
-      x: lerp(pa.x, pb.x, t), y: lerp(pa.y, pb.y, t), z: lerp(pa.z, pb.z, t),
-      f: lerpAngle(pa.f, pb.f, t),
-    };
-  });
-  const ball = {
-    x: lerp(A.ball.x, B.ball.x, t), y: lerp(A.ball.y, B.ball.y, t), z: lerp(A.ball.z, B.ball.z, t),
-    owner: B.ball.owner, juggling: B.ball.juggling,
-  };
-  return { players, ball, clock: B.clock, score: B.score, flash: B.flash, kickoff: B.kickoff };
+  // distant crowd stand (parallax)
+  const py = GROUND - 150;
+  ctx.fillStyle = '#0e2030';
+  const off = -(camX * 0.4) % 64;
+  ctx.fillRect(0, py, C.VIEW_W, 150);
+  ctx.fillStyle = '#152c42';
+  for (let x = off - 64; x < C.VIEW_W; x += 64) { ctx.fillRect(x, py, 56, 60); }
+  // crowd dots
+  for (let x = off - 64; x < C.VIEW_W; x += 8) {
+    ctx.fillStyle = (x | 0) % 16 === 0 ? '#33597e' : '#1d3b56';
+    ctx.fillRect(x, py + 14 + ((x | 0) % 24), 4, 4);
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-const COL = {
-  grass1: '#0e3a1e', grass2: '#0c331b', line: 'rgba(220,255,230,.55)',
-  teamA: '#ffd23f', teamAd: '#b8870a', teamB: '#3fa9ff', teamBd: '#1c6fb0',
-  skin: '#f0b890', shadow: 'rgba(0,0,0,.30)',
-};
-
-function drawField() {
-  const W = C.FIELD_W, H = C.FIELD_H, B = C.BLOCK;
-  for (let y = 0; y < H; y += B) {
-    for (let x = 0; x < W; x += B) {
-      ctx.fillStyle = ((x / B + y / B) & 1) ? COL.grass1 : COL.grass2;
-      ctx.fillRect(x, y, B, B);
-    }
+function drawPitch() {
+  ctx.fillStyle = '#0e3a1e'; ctx.fillRect(0, GROUND, C.VIEW_W, C.VIEW_H - GROUND);
+  // mowed stripes scrolling with camera
+  for (let wx = 0; wx < C.WORLD_W; wx += 80) {
+    const x = sx(wx);
+    if (x < -80 || x > C.VIEW_W) continue;
+    ctx.fillStyle = ((wx / 80) | 0) % 2 ? '#0d3a1d' : '#0b3319';
+    ctx.fillRect(x, GROUND, 80, C.VIEW_H - GROUND);
   }
-  ctx.strokeStyle = COL.line; ctx.lineWidth = 3;
-  ctx.strokeRect(C.WALL, C.WALL, W - C.WALL * 2, H - C.WALL * 2);
+  // surface line
+  ctx.fillStyle = '#1f7a3e'; ctx.fillRect(0, GROUND - 2, C.VIEW_W, 3);
   // halfway line
-  ctx.beginPath(); ctx.moveTo(W / 2, C.WALL); ctx.lineTo(W / 2, H - C.WALL); ctx.stroke();
-  // center circle
-  ctx.beginPath(); ctx.arc(W / 2, H / 2, 66, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = COL.line; ctx.beginPath(); ctx.arc(W / 2, H / 2, 4, 0, Math.PI * 2); ctx.fill();
-  // penalty boxes
-  const boxH = C.GOAL_H + 90, boxW = 90;
-  ctx.strokeRect(C.WALL, (H - boxH) / 2, boxW, boxH);
-  ctx.strokeRect(W - C.WALL - boxW, (H - boxH) / 2, boxW, boxH);
-  // goals
-  drawGoal(0);
-  drawGoal(1);
+  const hx = sx(C.WORLD_W / 2);
+  ctx.strokeStyle = 'rgba(220,255,230,.4)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(hx, GROUND); ctx.lineTo(hx, GROUND - 60); ctx.stroke();
 }
 
-function drawGoal(side) {
-  const W = C.FIELD_W;
-  const x = side === 0 ? C.WALL : W - C.WALL;
-  const depth = side === 0 ? -16 : 16;
-  ctx.save();
+function drawGoal(worldX) {
+  const x = sx(worldX);
+  const top = GROUND - C.CROSSBAR_H;
+  const dir = worldX === 0 ? 1 : -1;
   ctx.strokeStyle = '#eafff0'; ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(x, C.GOAL_TOP); ctx.lineTo(x + depth, C.GOAL_TOP);
-  ctx.lineTo(x + depth, C.GOAL_BOT); ctx.lineTo(x, C.GOAL_BOT);
-  ctx.stroke();
-  // net hatch
-  ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1;
-  for (let yy = C.GOAL_TOP; yy <= C.GOAL_BOT; yy += 9) {
-    ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + depth, yy); ctx.stroke();
-  }
-  ctx.restore();
+  ctx.beginPath(); ctx.moveTo(x, GROUND); ctx.lineTo(x, top); ctx.lineTo(x + dir * C.GOAL_DEPTH, top); ctx.stroke();
+  // net
+  ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.lineWidth = 1;
+  for (let yy = top; yy < GROUND; yy += 10) { ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + dir * C.GOAL_DEPTH, yy + 4); ctx.stroke(); }
+  for (let k = 0; k <= C.GOAL_DEPTH; k += 8) { ctx.beginPath(); ctx.moveTo(x + dir * k, top); ctx.lineTo(x + dir * k, GROUND); ctx.stroke(); }
 }
 
-// the little pixel guy
-function drawPlayer(p, isMe) {
-  const dark = p.team === 0 ? COL.teamAd : COL.teamBd;
-  const main = p.team === 0 ? COL.teamA : COL.teamB;
-  const sx = p.x, gy = p.y;          // ground position
-  const sy = gy - p.z;               // sprite lifted by jump height
+// ---- the little pixel guy (side view) ----
+function R(c, x, y, w, h) { ctx.fillStyle = c; ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); }
+function drawPlayer(p, isMe, time) {
+  const col = TEAM[p.team];
+  const px = sx(p.x), feetY = GROUND - p.h;
+  // shadow
+  const ssc = Math.max(0.4, 1 - p.h / 200);
+  ctx.fillStyle = 'rgba(0,0,0,.3)';
+  ctx.beginPath(); ctx.ellipse(px, GROUND + 3, 14 * ssc, 4 * ssc, 0, 0, Math.PI * 2); ctx.fill();
 
-  // shadow (shrinks with height)
-  const sh = Math.max(0.35, 1 - p.z / 220);
-  ctx.fillStyle = COL.shadow;
-  ctx.beginPath();
-  ctx.ellipse(sx, gy + 11, 13 * sh, 5 * sh, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  const faceLeft = Math.cos(p.f) < 0;
-  const phase = p.a * 9;
   ctx.save();
-  ctx.translate(sx, sy);
-  if (faceLeft) ctx.scale(-1, 1);
+  ctx.translate(px, feetY);
+  ctx.scale(p.f || 1, 1); // face: +1 right, -1 left  (forward = +x in local space)
+  const ph = p.a * 11;
+  const swing = Math.sin(ph) * 7;
 
-  if (p.s === C.S_DOWN) {
-    // lying down, dizzy
-    ctx.rotate(Math.PI / 2);
-  } else if (p.s === C.S_SLIDE) {
-    ctx.rotate(0.9);
-  } else if (p.s === C.S_BICYCLE) {
-    ctx.rotate(-phase % (Math.PI * 2));
+  // pose deltas
+  let lean = 0, kneeUp = 0, headLift = 0, legA = swing, legB = -swing, torsoY = 0, rot = 0, armSwing = Math.sin(ph + Math.PI) * 6;
+  switch (p.s) {
+    case C.S_RUN: case C.S_DRIBBLE: lean = 4; break;
+    case C.S_IDLE: legA = legB = 0; torsoY = Math.sin(p.a * 2) * 1; armSwing = Math.sin(p.a * 2) * 1; break;
+    case C.S_KNEE: kneeUp = 10 + Math.abs(Math.sin(ph)) * 6; legA = 0; legB = 0; armSwing = 5; break;
+    case C.S_HEAD: headLift = 4; legA = legB = 2; armSwing = 8; lean = -3; break;
+    case C.S_AIR: legA = -8; legB = -10; armSwing = 8; break;
+    case C.S_SHOOT: legA = 16; legB = -4; lean = 6; armSwing = -6; break;
+    case C.S_VOLLEY: kneeUp = 18; legB = -6; lean = 4; armSwing = 10; break;
+    case C.S_HEADER: headLift = 8; legA = -4; legB = -6; armSwing = 12; lean = -6; break;
+    case C.S_FLY: legA = 20; legB = 6; lean = 10; armSwing = -10; break;
+    case C.S_SLIDE: rot = 1.05; legA = 18; legB = 8; break;
+    case C.S_BLOCK: torsoY = 6; legA = legB = 0; armSwing = -4; break;
+    case C.S_BIKE: rot = -ph % (Math.PI * 2); legA = 16; legB = -16; break;
+    case C.S_DOWN: rot = 1.45; break;
   }
+  if (rot) ctx.rotate(rot);
+  ctx.translate(lean, 0);
 
-  // legs
-  let swing = 0;
-  if (p.s === C.S_RUN) swing = Math.sin(phase) * 5;
-  else if (p.s === C.S_JUGGLE) swing = Math.abs(Math.sin(phase)) * 7;
-  else if (p.s === C.S_IDLE) swing = Math.sin(p.a * 2) * 1;
-  px(dark, -5 + swing * 0.2, 4, 4, 9);   // left leg
-  px(dark, 1 - swing * 0.2, 4, 4, 9);    // right leg
-  // a kicking leg for juggle/shoot
-  if (p.s === C.S_JUGGLE || p.s === C.S_SHOOT || p.s === C.S_BICYCLE) {
-    px(dark, 3, 2 - swing, 4, 9);
-  }
+  // legs (from hip y=-22 down to feet y=0); swing as horizontal offset of the foot
+  R(col.short, -5 + legB * 0.2, -24, 5, 14);          // back leg upper
+  R(col.dark, -5 + legB * 0.5, -12, 5, 12);           // back shin
+  if (kneeUp) { R(col.short, 2, -24 - kneeUp * 0.4, 5, 12); R(col.dark, 4, -24 - kneeUp, 5, 10); } // raised knee
+  else { R(col.short, 1 + legA * 0.2, -24, 5, 14); R(col.dark, 1 + legA * 0.5, -12, 5, 12); }
 
-  // body
-  px(main, -6, -8, 12, 13);
+  // torso
+  R(col.shirt, -6, -42 + torsoY, 12, 20);
   // arms
-  const arm = p.s === C.S_RUN ? Math.sin(phase + Math.PI) * 4 : (p.s === C.S_BICYCLE ? 6 : 1);
-  px(main, -8, -6 + arm * 0.3, 3, 8);
-  px(main, 5, -6 - arm * 0.3, 3, 8);
+  R(SKIN, -8, -40 + torsoY + armSwing * 0.2, 3, 11);
+  R(SKIN, 5, -40 + torsoY - armSwing * 0.2, 3, 11);
   // head
-  px(COL.skin, -4, -17, 8, 8);
-  // hair/cap accent
-  px(dark, -4, -17, 8, 3);
+  R(SKIN, -4, -54 + torsoY - headLift, 9, 11);
+  R(col.dark, -4, -54 + torsoY - headLift, 9, 3); // hair
+  // eye (faces forward = +x)
+  R('#15202b', 2, -50 + torsoY - headLift, 2, 2);
+  // knocked-out stars
+  if (p.s === C.S_DOWN) { R('#ffe27a', 2, -60, 3, 3); R('#ffe27a', 7, -56, 2, 2); }
 
   ctx.restore();
 
-  // name tag for humans
+  // name + you-marker
   if (!p.npc) {
     ctx.fillStyle = isMe ? '#fff' : 'rgba(255,255,255,.7)';
-    ctx.font = 'bold 11px "Courier New",monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(p.name, sx, sy - 26);
-    if (isMe) { ctx.fillStyle = main; ctx.fillText('▼', sx, sy - 36); }
+    ctx.font = 'bold 11px "Courier New",monospace'; ctx.textAlign = 'center';
+    ctx.fillText(p.name, px, feetY - 62);
   }
+  if (isMe) { ctx.fillStyle = col.shirt; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center'; ctx.fillText('▼', px, feetY - 70); }
 }
-function px(color, x, y, w, h) { ctx.fillStyle = color; ctx.fillRect(Math.round(x), Math.round(y), w, h); }
 
 function drawBall(b, time) {
-  const sh = Math.max(0.4, 1 - b.z / 240);
-  ctx.fillStyle = COL.shadow;
-  ctx.beginPath(); ctx.ellipse(b.x, b.y + 4, 7 * sh, 3 * sh, 0, 0, Math.PI * 2); ctx.fill();
-  const sy = b.y - b.z;
-  // ball
-  ctx.fillStyle = '#fbfbfb';
-  ctx.beginPath(); ctx.arc(b.x, sy, C.B_RADIUS, 0, Math.PI * 2); ctx.fill();
-  // spin spots
-  ctx.fillStyle = '#222';
-  const spin = (b.x + b.y) * 0.05;
-  for (let i = 0; i < 3; i++) {
-    const a = spin + i * 2.1;
-    ctx.beginPath(); ctx.arc(b.x + Math.cos(a) * 3, sy + Math.sin(a) * 3, 1.5, 0, Math.PI * 2); ctx.fill();
-  }
-  ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.arc(b.x, sy, C.B_RADIUS, 0, Math.PI * 2); ctx.stroke();
+  const px = sx(b.x), cy = GROUND - b.h - C.B_RADIUS;
+  const ssc = Math.max(0.4, 1 - b.h / 220);
+  ctx.fillStyle = 'rgba(0,0,0,.3)';
+  ctx.beginPath(); ctx.ellipse(px, GROUND + 3, 8 * ssc, 3 * ssc, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fbfbfb'; ctx.beginPath(); ctx.arc(px, cy, C.B_RADIUS, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#222'; const spin = b.x * 0.06;
+  for (let i = 0; i < 3; i++) { const a = spin + i * 2.1; ctx.beginPath(); ctx.arc(px + Math.cos(a) * 3, cy + Math.sin(a) * 3, 1.4, 0, Math.PI * 2); ctx.fill(); }
+  ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(px, cy, C.B_RADIUS, 0, Math.PI * 2); ctx.stroke();
 }
 
-function fmtClock(s) {
-  s = Math.max(0, Math.ceil(s));
-  const m = Math.floor(s / 60);
-  const ss = s % 60;
-  return `${m}:${ss < 10 ? '0' : ''}${ss}`;
-}
+const STANCE_NAME = ['FEET', 'KNEE', 'HEAD'];
+function drawHUD(v) {
+  // scoreboard
+  ctx.fillStyle = 'rgba(6,16,10,.85)'; ctx.fillRect(C.VIEW_W / 2 - 120, 10, 240, 46);
+  ctx.strokeStyle = '#1f5e3a'; ctx.lineWidth = 2; ctx.strokeRect(C.VIEW_W / 2 - 120, 10, 240, 46);
+  ctx.textAlign = 'center'; ctx.font = 'bold 30px "Courier New",monospace';
+  ctx.fillStyle = TEAM[0].shirt; ctx.fillText(v.score[0], C.VIEW_W / 2 - 78, 44);
+  ctx.fillStyle = TEAM[1].shirt; ctx.fillText(v.score[1], C.VIEW_W / 2 + 78, 44);
+  ctx.fillStyle = '#9fb'; ctx.font = '11px "Courier New",monospace'; ctx.fillText(`FIRST TO ${v.target}`, C.VIEW_W / 2, 34);
 
-function drawHUD(view) {
-  const W = C.FIELD_W;
-  // scoreboard panel
-  ctx.fillStyle = 'rgba(6,16,10,.85)';
-  ctx.fillRect(W / 2 - 110, 8, 220, 42);
-  ctx.strokeStyle = '#1f5e3a'; ctx.lineWidth = 2; ctx.strokeRect(W / 2 - 110, 8, 220, 42);
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 26px "Courier New",monospace';
-  ctx.fillStyle = COL.teamA; ctx.fillText(view.score[0], W / 2 - 70, 38);
-  ctx.fillStyle = COL.teamB; ctx.fillText(view.score[1], W / 2 + 70, 38);
-  ctx.fillStyle = '#eafff0'; ctx.font = 'bold 20px "Courier New",monospace';
-  ctx.fillText(fmtClock(view.clock), W / 2, 36);
-
-  if (view.flash) {
-    ctx.fillStyle = COL.teamA;
-    ctx.font = 'bold 64px "Courier New",monospace';
-    ctx.fillText(view.flash, W / 2, C.FIELD_H / 2 - 30);
-  }
-  if (view.kickoff && !view.flash) {
-    ctx.fillStyle = 'rgba(255,255,255,.85)';
-    ctx.font = 'bold 30px "Courier New",monospace';
-    ctx.fillText('GET READY', W / 2, C.FIELD_H / 2 - 30);
-  }
-}
-
-function render(time) {
-  requestAnimationFrame(render);
-  if (screens.game.classList.contains('hidden')) return;
-  const view = interpState();
-  if (!view) return;
-
-  drawField();
-
-  // draw entities sorted by ground-y for fake depth
-  const ents = view.players.map((p) => ({ kind: 'p', y: p.y, p }));
-  ents.push({ kind: 'b', y: view.ball.y, b: view.ball });
-  ents.sort((a, b) => a.y - b.y);
-  for (const e of ents) {
-    if (e.kind === 'p') drawPlayer(e.p, e.p.id === myEnt);
-    else drawBall(e.b, time);
+  // my stance ladder
+  const me = v.players.find((p) => p.id === myEnt);
+  if (me) {
+    const bx = 20, by = C.VIEW_H - 88;
+    ctx.textAlign = 'left'; ctx.font = 'bold 11px "Courier New",monospace';
+    ctx.fillStyle = 'rgba(6,16,10,.7)'; ctx.fillRect(bx - 8, by - 8, 92, 84);
+    for (let i = 2; i >= 0; i--) {
+      const yy = by + (2 - i) * 24;
+      const on = me.st === i;
+      ctx.fillStyle = on ? TEAM[me.team].shirt : '#27432f';
+      ctx.fillRect(bx, yy, 16, 16);
+      ctx.fillStyle = on ? '#fff' : '#5f7d68';
+      ctx.fillText(STANCE_NAME[i], bx + 24, yy + 12);
+    }
   }
 
-  drawHUD(view);
+  if (v.flash) { ctx.textAlign = 'center'; ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 60px "Courier New",monospace'; ctx.fillText(v.flash, C.VIEW_W / 2, C.VIEW_H / 2 - 20); }
+  if (v.kickoff && !v.flash) { ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = 'bold 26px "Courier New",monospace'; ctx.fillText('GET READY', C.VIEW_W / 2, C.VIEW_H / 2 - 20); }
 }
-requestAnimationFrame(render);
 
+requestAnimationFrame(draw);
 show('menu');

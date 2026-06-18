@@ -3,24 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>PIXEL FOOTY ⚽</title>
+  <title>NIDHOGG FOOTY ⚽</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div id="app">
     <!-- MENU -->
     <div id="menu" class="screen">
-      <h1 class="logo">PIXEL<span>FOOTY</span></h1>
-      <p class="tag">3v3 arcade soccer · juggle · bicycle kick · tackle</p>
+      <h1 class="logo">NIDHOGG<span>FOOTY</span></h1>
+      <p class="tag">side-on tug-of-war soccer · stances · duels · bicycle kicks</p>
       <div class="panel">
         <label>NAME</label>
         <input id="nameInput" maxlength="12" placeholder="player" />
-        <div class="row">
-          <button id="btnSolo" class="big">QUICK PLAY <small>vs CPU</small></button>
-        </div>
-        <div class="row">
-          <button id="btnCreate">CREATE LOBBY</button>
-        </div>
+        <div class="row"><button id="btnSolo" class="big">QUICK PLAY <small>1v1 vs CPU</small></button></div>
+        <div class="row"><button id="btnCreate">CREATE LOBBY</button></div>
         <div class="row joinrow">
           <input id="codeInput" maxlength="4" placeholder="CODE" />
           <button id="btnJoin">JOIN</button>
@@ -28,17 +24,27 @@
         <p id="menuErr" class="err"></p>
       </div>
       <div class="how">
-        <b>CONTROLS</b>
-        <div>Move: <kbd>WASD</kbd> / <kbd>↑↓←→</kbd></div>
-        <div><kbd>Space</kbd> — shoot · juggle-pass · slide tackle</div>
-        <div><kbd>Shift</kbd> — start juggle · bicycle kick · body tackle</div>
+        <b>HOW TO PLAY</b>
+        <div>Push the ball to the far goal. The camera follows the ball — wherever it goes, the screen goes.</div>
+        <div>Win the ball by matching its <u>height</u>: low slide for a dribble, flying kick for a knee, header for a head.</div>
+        <div class="ctrls">
+          <span><kbd>A</kbd><kbd>D</kbd> move</span>
+          <span><kbd>W</kbd> jump</span>
+          <span><kbd>↑</kbd><kbd>↓</kbd> stance (feet/knee/head)</span>
+          <span><kbd>Space</kbd> kick / tackle</span>
+          <span><kbd>Shift</kbd> bicycle kick</span>
+        </div>
       </div>
     </div>
 
     <!-- LOBBY -->
     <div id="lobby" class="screen hidden">
       <h2>LOBBY <span id="lobbyCode" class="code"></span></h2>
-      <p class="hint">Share the code — up to 3 players. Empty slots are filled by CPUs.</p>
+      <p class="hint">Share the code. Mode: <b id="lobbyMode">2v2</b> · empty slots filled by CPUs.</p>
+      <div class="row modes">
+        <button id="mode1" class="ghost">1v1</button>
+        <button id="mode2" class="ghost">2v2</button>
+      </div>
       <ul id="playerList"></ul>
       <div class="row">
         <button id="btnStart" class="big">START MATCH</button>
@@ -48,12 +54,20 @@
 
     <!-- GAME -->
     <div id="game" class="screen hidden">
-      <canvas id="cv" width="960" height="600"></canvas>
+      <canvas id="cv" width="960" height="540"></canvas>
       <div id="touch" class="hidden">
-        <div id="stick"><div id="nub"></div></div>
-        <div id="btns">
-          <button id="btnA" class="tbtn">A</button>
-          <button id="btnB" class="tbtn">B</button>
+        <div class="tpad left">
+          <button id="tLeft" class="tbtn">◀</button>
+          <button id="tRight" class="tbtn">▶</button>
+        </div>
+        <div class="tpad stance">
+          <button id="tUp" class="tbtn sm">▲</button>
+          <button id="tDown" class="tbtn sm">▼</button>
+        </div>
+        <div class="tpad right">
+          <button id="tJump" class="tbtn sm">JMP</button>
+          <button id="tAct" class="tbtn">KICK</button>
+          <button id="tBike" class="tbtn">BIKE</button>
         </div>
       </div>
     </div>
