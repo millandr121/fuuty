@@ -68,7 +68,7 @@ function newPlayer(team, isNPC, name, controllerId) {
     stun: 0, kickImm: 0, hitDone: false,
     input: { left: false, right: false, jump: false, up: false, down: false, act: false, bike: false },
     prev: { jump: false, up: false, down: false, act: false, bike: false },
-    ai: { cd: 0, stanceCd: 0 },
+    ai: { cd: 0, stanceCd: 0, readStance: 0, readCd: 0, lazy: rand(0.12, 0.3) },
   };
 }
 function createGame(room) {
@@ -265,6 +265,7 @@ function giveBall(game, p, stance) {
   const b = game.ball;
   b.owner = p.id; b.stance = stance == null ? p.stance : stance; b.lastTouch = p.id;
   b.vx = 0; b.vh = 0; p.stance = b.stance;
+  if (b.stance > 0) p.stanceTimer = C.STANCE_SETTLE; // don't instantly settle a trapped high ball
   if (p.ai) p.ai.cd = 0;
 }
 
@@ -276,11 +277,12 @@ function stepBall(game, dt) {
     const p = findP(game, b.owner);
     if (!p || p.stun > 0) { b.owner = null; }
     else {
-      // glue to carrier at stance height with a juggle bob
+      // glue to carrier so the ball actually meets the foot / knee / head
       b.stance = p.stance;
-      const bob = (p.stance > 0 ? Math.sin(p.anim * 12) * C.JUGGLE_BOB : 0);
-      b.x = approach(b.x, p.x + p.face * (C.P_RADIUS + 5), 1400 * dt);
-      b.h = approach(b.h, stanceH(p.stance) + Math.max(0, bob), 1400 * dt);
+      const bob = (p.stance > 0 ? Math.sin(p.anim * 11) * C.JUGGLE_BOB : 0);
+      const off = C.STANCE_OFF[p.stance] || 10;
+      b.x = approach(b.x, p.x + p.face * off, 1600 * dt);
+      b.h = approach(b.h, stanceH(p.stance) + bob, 1600 * dt);
       b.vx = 0; b.vh = 0;
       return;
     }
@@ -351,21 +353,30 @@ function checkGoal(game) {
 // ---------------------------------------------------------------------------
 function clearAI(p) { const i = p.input; i.left = i.right = i.jump = i.up = i.down = i.act = i.bike = false; }
 function pressTowardStance(p, target) {
-  // set stance directly (NPCs don't need edge wiggling), but keep within rules
+  // NPCs match stance with a human-like delay, not instantly
   if (p.ai.stanceCd > 0) return;
-  if (p.stance < target) { p.stance++; p.stanceTimer = C.STANCE_SETTLE; p.ai.stanceCd = 0.12; }
-  else if (p.stance > target) { p.stance--; p.stanceTimer = C.STANCE_SETTLE; p.ai.stanceCd = 0.12; }
+  if (p.stance < target) { p.stance++; p.stanceTimer = C.STANCE_SETTLE; p.ai.stanceCd = 0.2; }
+  else if (p.stance > target) { p.stance--; p.stanceTimer = C.STANCE_SETTLE; p.ai.stanceCd = 0.2; }
 }
 function aiThink(game, p, dt) {
   clearAI(p);
   if (p.ai.cd > 0) p.ai.cd -= dt;
   if (p.ai.stanceCd > 0) p.ai.stanceCd -= dt;
+  if (p.ai.readCd > 0) p.ai.readCd -= dt;
   if (p.stun > 0 || (p.stateTimer > 0 && ACTION_STATES.has(p.state)) || game.kickoff > 0) return;
 
   const b = game.ball;
   const dir = C.attackDir(p.team);
   const goalX = C.targetGoalX(p.team);
   const owner = b.owner !== null ? findP(game, b.owner) : null;
+
+  // delayed, occasionally-wrong read of the ball's height — this is what makes
+  // the defender beatable: switch stance (or bicycle) at the last moment and it whiffs.
+  if (p.ai.readCd <= 0) {
+    const truth = owner ? b.stance : nearestStance(b.h);
+    p.ai.readStance = (Math.random() < 0.2) ? clamp(truth + (Math.random() < 0.5 ? -1 : 1), 0, 2) : truth;
+    p.ai.readCd = p.ai.lazy; // reaction time before re-reading
+  }
 
   if (owner && owner.id === p.id) {
     // I HAVE THE BALL — drive toward goal
@@ -388,18 +399,20 @@ function aiThink(game, p, dt) {
     const tx = clamp(owner.x + dir * 150, 30, C.WORLD_W - 30);
     moveTo(p, tx, 26);
   } else if (owner && owner.team !== p.team) {
-    // DEFEND — match the carrier's stance and challenge
-    moveTo(p, b.x - p.face * 18, 6);
+    // DEFEND — close down and challenge at its *believed* height (delayed/imperfect)
+    moveTo(p, b.x - p.face * 20, 8);
     p.face = sign(b.x - p.x) || p.face;
-    pressTowardStance(p, b.stance);
-    if (absd(b.x, p.x) < 46 && p.stance === b.stance && p.ai.cd <= 0) { p.input.act = true; p.ai.cd = 0.6; }
+    pressTowardStance(p, p.ai.readStance);
+    // only commits when its (lagged) stance genuinely matches the ball — so late
+    // stance changes by the attacker make it whiff
+    if (absd(b.x, p.x) < 46 && p.stance === b.stance && p.ai.cd <= 0) { p.input.act = true; p.ai.cd = 0.7; }
   } else {
-    // loose ball — go get it, set stance to its height
+    // loose ball — go get it, set stance to its believed height
     moveTo(p, b.x, 4);
     p.face = sign(b.x - p.x) || p.face;
-    pressTowardStance(p, nearestStance(b.h));
-    if (absd(b.x, p.x) < 40 && b.h > C.STANCE_H[1] - 10 && p.stance === nearestStance(b.h) && p.ai.cd <= 0) {
-      p.input.act = true; p.ai.cd = 0.5; // actively win a higher loose ball
+    pressTowardStance(p, p.ai.readStance);
+    if (absd(b.x, p.x) < 40 && b.h > C.STANCE_H[1] - 6 && p.stance === nearestStance(b.h) && p.ai.cd <= 0) {
+      p.input.act = true; p.ai.cd = 0.5;
     }
   }
 }
