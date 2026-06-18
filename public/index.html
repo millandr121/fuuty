@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>PIXEL FOOTY ⚽</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- MENU -->
+    <div id="menu" class="screen">
+      <h1 class="logo">PIXEL<span>FOOTY</span></h1>
+      <p class="tag">3v3 arcade soccer · juggle · bicycle kick · tackle</p>
+      <div class="panel">
+        <label>NAME</label>
+        <input id="nameInput" maxlength="12" placeholder="player" />
+        <div class="row">
+          <button id="btnSolo" class="big">QUICK PLAY <small>vs CPU</small></button>
+        </div>
+        <div class="row">
+          <button id="btnCreate">CREATE LOBBY</button>
+        </div>
+        <div class="row joinrow">
+          <input id="codeInput" maxlength="4" placeholder="CODE" />
+          <button id="btnJoin">JOIN</button>
+        </div>
+        <p id="menuErr" class="err"></p>
+      </div>
+      <div class="how">
+        <b>CONTROLS</b>
+        <div>Move: <kbd>WASD</kbd> / <kbd>↑↓←→</kbd></div>
+        <div><kbd>Space</kbd> — shoot · juggle-pass · slide tackle</div>
+        <div><kbd>Shift</kbd> — start juggle · bicycle kick · body tackle</div>
+      </div>
+    </div>
+
+    <!-- LOBBY -->
+    <div id="lobby" class="screen hidden">
+      <h2>LOBBY <span id="lobbyCode" class="code"></span></h2>
+      <p class="hint">Share the code — up to 3 players. Empty slots are filled by CPUs.</p>
+      <ul id="playerList"></ul>
+      <div class="row">
+        <button id="btnStart" class="big">START MATCH</button>
+        <button id="btnLeave" class="ghost">LEAVE</button>
+      </div>
+    </div>
+
+    <!-- GAME -->
+    <div id="game" class="screen hidden">
+      <canvas id="cv" width="960" height="600"></canvas>
+      <div id="touch" class="hidden">
+        <div id="stick"><div id="nub"></div></div>
+        <div id="btns">
+          <button id="btnA" class="tbtn">A</button>
+          <button id="btnB" class="tbtn">B</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- GAMEOVER -->
+    <div id="over" class="screen hidden">
+      <h1 id="overTitle">FULL TIME</h1>
+      <div id="overScore" class="bigscore"></div>
+      <button id="btnAgain" class="big">BACK TO MENU</button>
+    </div>
+  </div>
+
+  <script src="/shared/constants.js"></script>
+  <script src="/client.js"></script>
+</body>
+</html>

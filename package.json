@@ -1,0 +1,14 @@
+{
+  "name": "pixel-footy",
+  "version": "0.1.0",
+  "description": "Online multiplayer pixel-guy soccer with juggling, bicycle kicks, slide & body tackles. HTML5 + Node/WebSocket.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
