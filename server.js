@@ -6,20 +6,14 @@ const { WebSocketServer } = require('ws');
 const C = require('./shared/constants');
 
 // ---------------------------------------------------------------------------
-// Static file server (serves /public)
+// Static files
 // ---------------------------------------------------------------------------
 const PUBLIC = path.join(__dirname, 'public');
-const MIME = {
-  '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
-  '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json',
-};
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
 const server = http.createServer((req, res) => {
   let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
   if (urlPath === '/') urlPath = '/index.html';
-  // shared constants are fetched by the client too
-  let filePath;
-  if (urlPath.startsWith('/shared/')) filePath = path.join(__dirname, urlPath);
-  else filePath = path.join(PUBLIC, urlPath);
+  const filePath = urlPath.startsWith('/shared/') ? path.join(__dirname, urlPath) : path.join(PUBLIC, urlPath);
   if (!filePath.startsWith(__dirname)) { res.writeHead(403); return res.end('forbidden'); }
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); return res.end('not found'); }
@@ -27,384 +21,251 @@ const server = http.createServer((req, res) => {
     res.end(data);
   });
 });
-
 const wss = new WebSocketServer({ server });
 
 // ---------------------------------------------------------------------------
-// Math helpers
+// helpers
 // ---------------------------------------------------------------------------
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-const len = (x, y) => Math.hypot(x, y);
+const sign = (v) => (v < 0 ? -1 : 1);
 const rand = (a, b) => a + Math.random() * (b - a);
-function approach(cur, target, maxDelta) {
-  const d = target - cur;
-  if (Math.abs(d) <= maxDelta) return target;
-  return cur + Math.sign(d) * maxDelta;
-}
+const absd = (a, b) => Math.abs(a - b);
+function approach(cur, target, maxDelta) { const d = target - cur; return Math.abs(d) <= maxDelta ? target : cur + sign(d) * maxDelta; }
+const ACTION_STATES = new Set([C.S_SHOOT, C.S_VOLLEY, C.S_HEADER, C.S_SLIDE, C.S_BLOCK, C.S_FLY, C.S_BIKE]);
 
 // ---------------------------------------------------------------------------
-// Rooms / lobbies
+// rooms / lobbies
 // ---------------------------------------------------------------------------
-const rooms = new Map(); // code -> room
-let nextEntId = 1;
+const rooms = new Map();
+let nextId = 1;
 
 function makeCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code;
-  do {
-    code = '';
-    for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  } while (rooms.has(code));
-  return code;
+  const ch = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let c;
+  do { c = ''; for (let i = 0; i < 4; i++) c += ch[Math.floor(Math.random() * ch.length)]; } while (rooms.has(c));
+  return c;
 }
-
-function createRoom() {
+function createRoom(perSide) {
   const code = makeCode();
-  const room = {
-    code,
-    members: [],     // {ws, name, id, ready}
-    started: false,
-    game: null,
-    loop: null,
-    snapAcc: 0,
-  };
+  const room = { code, perSide: perSide || 2, members: [], started: false, game: null, loop: null, acc: 0 };
   rooms.set(code, room);
   return room;
 }
-
-function broadcast(room, obj) {
-  const msg = JSON.stringify(obj);
-  for (const m of room.members) {
-    if (m.ws.readyState === 1) m.ws.send(msg);
-  }
-}
-
+function broadcast(room, obj) { const m = JSON.stringify(obj); for (const x of room.members) if (x.ws.readyState === 1) x.ws.send(m); }
 function lobbyState(room) {
-  return {
-    type: 'lobby',
-    code: room.code,
-    started: room.started,
-    players: room.members.map((m) => ({ id: m.id, name: m.name, ready: m.ready })),
-  };
+  return { type: 'lobby', code: room.code, perSide: room.perSide, started: room.started,
+    players: room.members.map((m) => ({ id: m.id, name: m.name })) };
 }
 
 // ---------------------------------------------------------------------------
-// Game construction
+// game construction
 // ---------------------------------------------------------------------------
 function newPlayer(team, isNPC, name, controllerId) {
   return {
-    id: nextEntId++,
-    name: name || (isNPC ? 'CPU' : 'P'),
-    team, isNPC, controllerId: controllerId || null,
-    x: 0, y: 0, vx: 0, vy: 0, z: 0, vz: 0,
-    facing: team === 0 ? 0 : Math.PI,
-    state: C.S_IDLE, stateTimer: 0, anim: 0,
-    stun: 0, kickImm: 0,
-    input: { up: false, down: false, left: false, right: false, primary: false, special: false },
-    prev: { primary: false, special: false },
-    ai: { target: null, retarget: 0, actCd: 0 },
+    id: nextId++, name: name || (isNPC ? 'CPU' : 'P'), team, isNPC, controllerId: controllerId || null,
+    x: 0, h: 0, vx: 0, vh: 0, grounded: true, face: C.attackDir(team),
+    stance: 0, stanceTimer: 0,
+    state: C.S_IDLE, stateTimer: 0, anim: Math.random() * 10,
+    stun: 0, kickImm: 0, hitDone: false,
+    input: { left: false, right: false, jump: false, up: false, down: false, act: false, bike: false },
+    prev: { jump: false, up: false, down: false, act: false, bike: false },
+    ai: { cd: 0, stanceCd: 0 },
   };
 }
-
-function spawnPositions(team) {
-  // formation: 3 across, defenders near own goal-ish; team 0 attacks +x, team 1 attacks -x
-  const left = team === 0;
-  const baseX = left ? C.FIELD_W * 0.28 : C.FIELD_W * 0.72;
-  const ys = [C.FIELD_H * 0.3, C.FIELD_H * 0.5, C.FIELD_H * 0.7];
-  return ys.map((y, i) => ({ x: baseX + (left ? -1 : 1) * (i === 1 ? -40 : 0), y }));
-}
-
 function createGame(room) {
-  const humans = room.members.slice(); // order matters for team assignment
+  const perSide = room.perSide;
   const players = [];
-  // assign humans alternating to balance teams
   let t0 = 0, t1 = 0;
-  for (const m of humans) {
+  for (const m of room.members) {
     const team = t0 <= t1 ? 0 : 1;
     if (team === 0) t0++; else t1++;
     const p = newPlayer(team, false, m.name, m.id);
-    players.push(p);
-    m.entId = p.id;
+    players.push(p); m.entId = p.id;
   }
-  // fill with NPCs
-  while (t0 < C.TEAM_SIZE) { players.push(newPlayer(0, true, 'CPU')); t0++; }
-  while (t1 < C.TEAM_SIZE) { players.push(newPlayer(1, true, 'CPU')); t1++; }
-
+  while (t0 < perSide) { players.push(newPlayer(0, true, 'CPU')); t0++; }
+  while (t1 < perSide) { players.push(newPlayer(1, true, 'CPU')); t1++; }
   const game = {
-    players,
-    ball: { x: C.FIELD_W / 2, y: C.FIELD_H / 2, z: 0, vx: 0, vy: 0, vz: 0, owner: null, juggling: false, lastTouch: null, immTeam: null, immTimer: 0 },
-    score: [0, 0],
-    clock: C.MATCH_SECONDS,
-    over: false,
-    kickoffTimer: 1.0,
-    flash: null, // {text, t}
+    perSide, players,
+    ball: { x: C.WORLD_W / 2, h: 10, vx: 0, vh: 0, owner: null, stance: 0, lastTouch: null, immTeam: null, immTimer: 0 },
+    score: [0, 0], over: false, winner: -1, kickoff: 1.0, flash: null,
   };
   resetKickoff(game, 0);
   return game;
 }
-
-function resetKickoff(game, towardTeam) {
+function teammates(game, team) { return game.players.filter((p) => p.team === team); }
+function spawn(game) {
   for (const p of game.players) {
-    const pos = spawnPositions(p.team);
-    // give each teammate a distinct slot
-    const mates = game.players.filter((q) => q.team === p.team);
-    const idx = mates.indexOf(p);
-    const slot = pos[idx % pos.length];
-    p.x = slot.x; p.y = slot.y; p.vx = 0; p.vy = 0; p.z = 0; p.vz = 0;
-    p.state = C.S_IDLE; p.stateTimer = 0; p.stun = 0; p.kickImm = 0;
-    p.facing = p.team === 0 ? 0 : Math.PI;
+    const mates = teammates(game, p.team); const idx = mates.indexOf(p);
+    const side = p.team === 0 ? -1 : 1; // team0 starts left of center
+    const base = C.WORLD_W / 2 + side * (180 + idx * 110);
+    p.x = base; p.h = 0; p.vx = 0; p.vh = 0; p.grounded = true;
+    p.stance = 0; p.stanceTimer = 0; p.state = C.S_IDLE; p.stateTimer = 0; p.stun = 0; p.kickImm = 0;
+    p.face = C.attackDir(p.team);
   }
+}
+function resetKickoff(game) {
+  spawn(game);
   const b = game.ball;
-  b.x = C.FIELD_W / 2; b.y = C.FIELD_H / 2; b.z = 0; b.vx = 0; b.vy = 0; b.vz = 0;
-  b.owner = null; b.juggling = false; b.immTeam = null; b.immTimer = 0;
-  game.kickoffTimer = 0.8;
+  b.x = C.WORLD_W / 2; b.h = 10; b.vx = rand(-40, 40); b.vh = 0; b.owner = null; b.stance = 0; b.immTeam = null; b.immTimer = 0;
+  game.kickoff = 0.8;
 }
 
 // ---------------------------------------------------------------------------
-// Simulation
+// simulation
 // ---------------------------------------------------------------------------
-function findPlayer(game, id) { return game.players.find((p) => p.id === id); }
-
-function attackDir(team) { return team === 0 ? 1 : -1; } // +x or -x
-function ownGoalX(team) { return team === 0 ? C.WALL : C.FIELD_W - C.WALL; }
-function targetGoalX(team) { return team === 0 ? C.FIELD_W - C.WALL : C.WALL; }
+const findP = (game, id) => game.players.find((p) => p.id === id);
 
 function stepGame(game, dt) {
   if (game.over) return;
-
-  // clock
-  if (game.kickoffTimer > 0) game.kickoffTimer -= dt;
-  else {
-    game.clock -= dt;
-    if (game.clock <= 0) { game.clock = 0; game.over = true; }
-  }
+  if (game.kickoff > 0) game.kickoff -= dt;
   if (game.flash) { game.flash.t -= dt; if (game.flash.t <= 0) game.flash = null; }
-
-  for (const p of game.players) {
-    if (p.isNPC) aiThink(game, p, dt);
-    stepPlayer(game, p, dt);
-  }
+  for (const p of game.players) { if (p.isNPC) aiThink(game, p, dt); stepPlayer(game, p, dt); }
   stepBall(game, dt);
-  resolvePlayerCollisions(game);
-  checkGoals(game);
+  separate(game);
+  checkGoal(game);
 }
+
+function stanceH(s) { return C.STANCE_H[s]; }
 
 function stepPlayer(game, p, dt) {
   p.anim += dt;
   if (p.kickImm > 0) p.kickImm -= dt;
 
-  // jump physics (player z)
-  if (p.z > 0 || p.vz !== 0) {
-    p.z += p.vz * dt;
-    p.vz -= C.GRAVITY * dt;
-    if (p.z <= 0) { p.z = 0; p.vz = 0; }
+  // vertical motion
+  if (!p.grounded || p.vh > 0) {
+    p.h += p.vh * dt; p.vh -= C.GRAVITY * dt;
+    if (p.h <= 0) { p.h = 0; p.vh = 0; p.grounded = true; } else p.grounded = false;
   }
 
-  // down/stunned: lie there
+  // knocked down
   if (p.stun > 0) {
-    p.stun -= dt;
-    p.vx = approach(p.vx, 0, 600 * dt);
-    p.vy = approach(p.vy, 0, 600 * dt);
-    p.x += p.vx * dt; p.y += p.vy * dt;
-    p.state = C.S_DOWN;
-    confinePlayer(p);
-    if (p.stun <= 0) { p.state = C.S_IDLE; }
+    p.stun -= dt; p.state = C.S_DOWN;
+    p.vx = approach(p.vx, 0, 700 * dt); p.x += p.vx * dt; confine(p);
+    if (p.stun <= 0) p.state = C.S_IDLE;
     return;
   }
 
-  // timed states (slide / body / bicycle / shoot)
-  if (p.stateTimer > 0) {
+  // timed action states
+  if (p.stateTimer > 0 && ACTION_STATES.has(p.state)) {
     p.stateTimer -= dt;
-    if (p.state === C.S_SLIDE) {
-      // keep momentum, decelerate
-      p.vx = approach(p.vx, 0, 520 * dt);
-      p.vy = approach(p.vy, 0, 520 * dt);
-      p.x += p.vx * dt; p.y += p.vy * dt;
-      tackleProbe(game, p, C.SLIDE_REACH, 'slide');
-      confinePlayer(p);
-      if (p.stateTimer <= 0) p.state = C.S_IDLE;
-      return;
-    }
-    if (p.state === C.S_BODY) {
-      p.x += p.vx * dt; p.y += p.vy * dt;
-      p.vx = approach(p.vx, 0, 400 * dt);
-      p.vy = approach(p.vy, 0, 400 * dt);
-      tackleProbe(game, p, C.BODY_REACH, 'body');
-      confinePlayer(p);
-      if (p.stateTimer <= 0) p.state = C.S_IDLE;
-      return;
-    }
-    if (p.state === C.S_BICYCLE || p.state === C.S_SHOOT) {
-      // brief lock; movement frozen-ish
-      p.x += p.vx * dt; p.y += p.vy * dt;
-      p.vx = approach(p.vx, 0, 800 * dt);
-      p.vy = approach(p.vy, 0, 800 * dt);
-      confinePlayer(p);
-      if (p.stateTimer <= 0) p.state = (p.z > 0 ? p.state : C.S_IDLE);
-      if (p.stateTimer <= 0 && p.z <= 0) p.state = C.S_IDLE;
-      return;
-    }
+    if (p.state === C.S_SLIDE) { p.vx = approach(p.vx, 0, 520 * dt); p.x += p.vx * dt; contest(game, p, 0, C.SLIDE_REACH); }
+    else if (p.state === C.S_BLOCK) { p.vx = approach(p.vx, 0, 800 * dt); p.x += p.vx * dt; contest(game, p, 0, C.BLOCK_REACH); }
+    else if (p.state === C.S_FLY) { p.x += p.vx * dt; contest(game, p, 1, C.FLY_REACH); }
+    else if (p.state === C.S_HEADER) { p.x += p.vx * dt; contest(game, p, 2, C.HEAD_REACH); }
+    else { p.x += p.vx * dt; p.vx = approach(p.vx, 0, 900 * dt); } // shoot/volley/bike lock
+    confine(p);
+    if (p.stateTimer <= 0 && p.grounded) p.state = C.S_IDLE;
+    if (p.stateTimer <= 0 && !p.grounded) p.state = C.S_AIR;
+    return;
   }
 
-  // normal movement from input
-  const inx = (p.input.right ? 1 : 0) - (p.input.left ? 1 : 0);
-  const iny = (p.input.down ? 1 : 0) - (p.input.up ? 1 : 0);
-  let dvx = 0, dvy = 0;
-  const l = len(inx, iny);
-  if (l > 0) {
-    dvx = (inx / l) * C.P_SPEED;
-    dvy = (iny / l) * C.P_SPEED;
-    p.facing = Math.atan2(iny, inx);
-  }
-  p.vx = approach(p.vx, dvx, C.P_ACCEL * dt);
-  p.vy = approach(p.vy, dvy, C.P_ACCEL * dt);
-  p.x += p.vx * dt; p.y += p.vy * dt;
-  confinePlayer(p);
+  // horizontal movement
+  const dirIn = (p.input.right ? 1 : 0) - (p.input.left ? 1 : 0);
+  p.vx = approach(p.vx, dirIn * C.P_SPEED, C.P_ACCEL * dt);
+  p.x += p.vx * dt; confine(p);
+  if (dirIn !== 0) p.face = dirIn;
 
-  const hasBall = game.ball.owner === p.id;
-  if (game.ball.juggling && hasBall) p.state = C.S_JUGGLE;
-  else p.state = l > 0 ? C.S_RUN : C.S_IDLE;
+  // jump
+  const e = (k) => p.input[k] && !p.prev[k];
+  if (e('jump') && p.grounded) { p.vh = C.JUMP_VH; p.grounded = false; }
 
-  // ---- actions (edge triggered) ----
-  const primEdge = p.input.primary && !p.prev.primary;
-  const specEdge = p.input.special && !p.prev.special;
-  p.prev.primary = p.input.primary;
-  p.prev.special = p.input.special;
+  // stance changes (juggle up / settle down)
+  const has = game.ball.owner === p.id;
+  if (e('up')) { p.stance = Math.min(2, p.stance + 1); p.stanceTimer = C.STANCE_SETTLE; if (has) game.ball.vh = 120; }
+  if (e('down')) { p.stance = Math.max(0, p.stance - 1); p.stanceTimer = C.STANCE_SETTLE; }
+  if (p.stance > 0) { p.stanceTimer -= dt; if (p.stanceTimer <= 0) { p.stance--; p.stanceTimer = C.STANCE_SETTLE; } }
 
-  if (primEdge) doPrimary(game, p);
-  if (specEdge) doSpecial(game, p);
+  // actions
+  let started = false;
+  if (e('act')) started = doAction(game, p) || started;
+  if (e('bike')) started = doBicycle(game, p) || started;
+
+  p.prev.jump = p.input.jump; p.prev.up = p.input.up; p.prev.down = p.input.down;
+  p.prev.act = p.input.act; p.prev.bike = p.input.bike;
+
+  if (started) return;
+
+  // locomotion state for animation
+  if (!p.grounded) p.state = C.S_AIR;
+  else if (has) p.state = p.stance === 2 ? C.S_HEAD : p.stance === 1 ? C.S_KNEE : (Math.abs(p.vx) > 30 ? C.S_DRIBBLE : C.S_DRIBBLE);
+  else p.state = Math.abs(p.vx) > 30 ? C.S_RUN : C.S_IDLE;
 }
 
-function confinePlayer(p) {
-  p.x = clamp(p.x, C.WALL + C.P_RADIUS, C.FIELD_W - C.WALL - C.P_RADIUS);
-  p.y = clamp(p.y, C.WALL + C.P_RADIUS, C.FIELD_H - C.WALL - C.P_RADIUS);
-}
+function confine(p) { p.x = clamp(p.x, 14, C.WORLD_W - 14); }
 
-function kickImmunity(game, p) {
-  p.kickImm = C.KICK_IMMUNITY;
-  game.ball.immTeam = null; // anyone can pick up
-}
+function kickImmunity(game, p) { p.kickImm = C.KICK_IMMUNITY; }
 
-// Primary: shoot / juggle pass / slide tackle / trap
-function doPrimary(game, p) {
+// Space — with ball: kick forward at stance; no ball: contest at stance
+function doAction(game, p) {
   const b = game.ball;
-  const hasBall = b.owner === p.id;
-  if (hasBall && b.juggling) {
-    // juggle pass: pop ball up & forward
-    b.owner = null; b.juggling = false;
-    b.vx = Math.cos(p.facing) * C.JUGGLE_PASS_FWD;
-    b.vy = Math.sin(p.facing) * C.JUGGLE_PASS_FWD;
-    b.vz = C.JUGGLE_PASS_VZ;
-    b.lastTouch = p.id;
-    kickImmunity(game, p);
-    p.state = C.S_SHOOT; p.stateTimer = 0.2;
-    return;
+  if (b.owner === p.id) {
+    releaseShot(game, p);
+    return true;
   }
-  if (hasBall) {
-    // shoot along the ground/low
-    b.owner = null; b.juggling = false;
-    b.vx = Math.cos(p.facing) * C.SHOOT_SPEED;
-    b.vy = Math.sin(p.facing) * C.SHOOT_SPEED;
-    b.vz = C.SHOOT_LIFT;
-    b.lastTouch = p.id;
-    kickImmunity(game, p);
-    p.state = C.S_SHOOT; p.stateTimer = 0.22;
-    return;
+  // start a stance-matched challenge
+  if (p.stance === 0) {
+    if (Math.abs(p.vx) > 60) { p.state = C.S_SLIDE; p.stateTimer = C.SLIDE_TIME; p.vx = p.face * C.SLIDE_VX; }
+    else { p.state = C.S_BLOCK; p.stateTimer = C.BLOCK_TIME; }
+  } else if (p.stance === 1) {
+    p.state = C.S_FLY; p.stateTimer = C.FLY_TIME; p.vx = p.face * C.FLY_VX; p.vh = C.FLY_VH; p.grounded = false;
+  } else {
+    p.state = C.S_HEADER; p.stateTimer = C.HEAD_TIME; p.vh = C.HEAD_VH; p.grounded = false;
   }
-  // no ball: try to trap an airborne ball nearby, else slide tackle
-  if (b.owner === null && len(b.x - p.x, b.y - p.y) < C.COLLECT_RADIUS + 10 && b.z < C.JUGGLE_HIGH + 20) {
-    // soft trap -> begin dribbling
-    if (canCollect(game, p)) { giveBall(game, p, false); return; }
-  }
-  // slide tackle
-  p.state = C.S_SLIDE; p.stateTimer = C.SLIDE_TIME;
-  p.vx = Math.cos(p.facing) * C.SLIDE_SPEED;
-  p.vy = Math.sin(p.facing) * C.SLIDE_SPEED;
-}
-
-// Special: start juggling / bicycle kick / body tackle
-function doSpecial(game, p) {
-  const b = game.ball;
-  const hasBall = b.owner === p.id;
-  if (hasBall && !b.juggling) {
-    // flick ball up to begin juggling
-    b.juggling = true; b.z = C.JUGGLE_LOW; b.vz = C.JUGGLE_BOUNCE_VZ * 0.8;
-    p.state = C.S_JUGGLE;
-    return;
-  }
-  if (hasBall && b.juggling) {
-    // bicycle kick: jump and smash down-forward
-    b.owner = null; b.juggling = false;
-    b.vx = Math.cos(p.facing) * C.BICYCLE_SHOT_SPEED;
-    b.vy = Math.sin(p.facing) * C.BICYCLE_SHOT_SPEED;
-    b.vz = C.BICYCLE_SHOT_DOWN;
-    b.lastTouch = p.id;
-    kickImmunity(game, p);
-    p.vz = C.BICYCLE_JUMP_VZ; p.z = Math.max(p.z, 1);
-    p.state = C.S_BICYCLE; p.stateTimer = 0.5;
-    return;
-  }
-  // no ball: body tackle (hop + bump)
-  p.state = C.S_BODY; p.stateTimer = C.BODY_TIME;
-  p.vz = C.BODY_JUMP_VZ; p.z = Math.max(p.z, 1);
-  p.vx = Math.cos(p.facing) * C.BODY_FWD;
-  p.vy = Math.sin(p.facing) * C.BODY_FWD;
-}
-
-function canCollect(game, p) {
-  if (p.kickImm > 0) return false;
-  const b = game.ball;
-  if (b.immTeam !== null && b.immTeam === p.team && b.immTimer > 0) return false;
+  p.hitDone = false;
   return true;
 }
 
-function giveBall(game, p, juggling) {
-  const b = game.ball;
-  b.owner = p.id; b.juggling = !!juggling; b.lastTouch = p.id;
-  b.vx = 0; b.vy = 0; b.vz = 0;
-  if (!juggling) b.z = 0;
+function releaseShot(game, p) {
+  const b = game.ball; const dir = p.face;
+  let vx, vh, st;
+  if (p.stance === 0) { vx = dir * C.SHOT_LOW_VX; vh = C.SHOT_LOW_VH; st = C.S_SHOOT; }
+  else if (p.stance === 1) { vx = dir * C.SHOT_MID_VX; vh = C.SHOT_MID_VH; st = C.S_VOLLEY; }
+  else { vx = dir * C.SHOT_HIGH_VX; vh = C.SHOT_HIGH_VH; st = C.S_HEADER; }
+  b.owner = null; b.vx = vx; b.vh = vh; b.lastTouch = p.id; b.immTeam = p.team; b.immTimer = 0.16;
+  kickImmunity(game, p);
+  p.state = st; p.stateTimer = 0.22;
 }
 
-// Tackle probe: while sliding/body-tackling, check for an opponent to dispossess
-function tackleProbe(game, p, reach, kind) {
+function doBicycle(game, p) {
   const b = game.ball;
-  for (const o of game.players) {
-    if (o === p || o.team === p.team || o.stun > 0) continue;
-    const d = len(o.x - p.x, o.y - p.y);
-    if (d > reach + C.P_RADIUS) continue;
-    // slide steals from a dribbler; body steals from a juggler
-    const oHasBall = b.owner === o.id;
-    const oDribbling = oHasBall && !b.juggling;
-    const oJuggling = oHasBall && b.juggling;
-    if (kind === 'slide') {
-      // knock the opponent down regardless; steal if they were dribbling
-      knockDown(o, p);
-      if (oDribbling) {
-        // ball pops loose toward tackler, slight pickup chance
-        b.owner = null; b.juggling = false; b.z = 0;
-        b.vx = Math.cos(p.facing) * 90; b.vy = Math.sin(p.facing) * 90;
-        b.lastTouch = p.id;
-        game.ball.immTeam = o.team; game.ball.immTimer = 0.25;
+  if (b.owner !== p.id) return false;
+  b.owner = null; b.vx = p.face * C.BIKE_VX; b.vh = C.BIKE_VH; b.lastTouch = p.id; b.immTeam = p.team; b.immTimer = 0.16;
+  kickImmunity(game, p);
+  p.vh = C.BIKE_JUMP; p.grounded = false;
+  p.state = C.S_BIKE; p.stateTimer = 0.5;
+  return true;
+}
+
+// during a challenge, look for a ball to win at this stance height
+function contest(game, p, stanceKind, reach) {
+  if (p.hitDone) return;
+  const b = game.ball;
+  const hitX = p.x + p.face * reach;
+  const hitH = stanceH(stanceKind);
+  // take it off a carrier — connects when your move's height physically meets the ball
+  if (b.owner !== null) {
+    const o = findP(game, b.owner);
+    if (o && o.team !== p.team && o.stun <= 0) {
+      if (absd(b.x, hitX) < reach && absd(b.h, hitH) < C.HMATCH) {
+        knockDown(o, p); giveBall(game, p, stanceKind); p.hitDone = true; return;
       }
-    } else if (kind === 'body') {
-      knockDown(o, p);
-      if (oJuggling || oDribbling) {
-        // bump the ball loose, pops up a little
-        b.owner = null; b.juggling = false;
-        b.vx = Math.cos(p.facing) * 120; b.vy = Math.sin(p.facing) * 120; b.vz = 200;
-        b.lastTouch = p.id;
-        game.ball.immTeam = o.team; game.ball.immTimer = 0.25;
-      }
+    }
+  } else {
+    // win a loose ball at matching height
+    if (absd(b.x, hitX) < reach && absd(b.h, hitH) < C.HMATCH && (b.immTeam !== p.team || b.immTimer <= 0)) {
+      giveBall(game, p, stanceKind); p.hitDone = true;
     }
   }
 }
 
 function knockDown(o, by) {
-  o.stun = C.STUN_TIME;
-  o.state = C.S_DOWN;
-  const a = Math.atan2(o.y - by.y, o.x - by.x);
-  o.vx = Math.cos(a) * 140;
-  o.vy = Math.sin(a) * 140;
+  o.stun = C.STUN_TIME; o.state = C.S_DOWN;
+  o.vx = sign((o.x - by.x) || by.face) * 160; o.vh = 120; o.grounded = false;
+}
+function giveBall(game, p, stance) {
+  const b = game.ball;
+  b.owner = p.id; b.stance = stance == null ? p.stance : stance; b.lastTouch = p.id;
+  b.vx = 0; b.vh = 0; p.stance = b.stance;
+  if (p.ai) p.ai.cd = 0;
 }
 
 function stepBall(game, dt) {
@@ -412,359 +273,232 @@ function stepBall(game, dt) {
   if (b.immTimer > 0) b.immTimer -= dt;
 
   if (b.owner !== null) {
-    const p = findPlayer(game, b.owner);
-    if (!p || p.stun > 0) { b.owner = null; b.juggling = false; }
-    else if (b.juggling) {
-      // ball bounces on top of the juggler
-      b.x = approach(b.x, p.x, 600 * dt);
-      b.y = approach(b.y, p.y, 600 * dt);
-      b.z += b.vz * dt; b.vz -= C.GRAVITY * dt;
-      if (b.z <= C.JUGGLE_LOW && b.vz < 0) { b.z = C.JUGGLE_LOW; b.vz = C.JUGGLE_BOUNCE_VZ; }
-      if (b.z > C.JUGGLE_HIGH && b.vz > 0) b.vz = 0;
-      return;
-    } else {
-      // dribbling: ball sits just ahead of the player's feet
-      const tx = p.x + Math.cos(p.facing) * C.DRIBBLE_AHEAD;
-      const ty = p.y + Math.sin(p.facing) * C.DRIBBLE_AHEAD;
-      b.x = approach(b.x, tx, 900 * dt);
-      b.y = approach(b.y, ty, 900 * dt);
-      b.z = 0; b.vx = 0; b.vy = 0; b.vz = 0;
+    const p = findP(game, b.owner);
+    if (!p || p.stun > 0) { b.owner = null; }
+    else {
+      // glue to carrier at stance height with a juggle bob
+      b.stance = p.stance;
+      const bob = (p.stance > 0 ? Math.sin(p.anim * 12) * C.JUGGLE_BOB : 0);
+      b.x = approach(b.x, p.x + p.face * (C.P_RADIUS + 5), 1400 * dt);
+      b.h = approach(b.h, stanceH(p.stance) + Math.max(0, bob), 1400 * dt);
+      b.vx = 0; b.vh = 0;
       return;
     }
   }
 
-  // free ball physics
-  b.z += b.vz * dt;
-  b.vz -= C.GRAVITY * dt;
-  b.x += b.vx * dt;
-  b.y += b.vy * dt;
+  // free ball
+  b.h += b.vh * dt; b.vh -= C.B_GRAVITY * dt; b.x += b.vx * dt;
+  if (b.h <= 0) {
+    b.h = 0;
+    if (b.vh < -25) b.vh = -b.vh * C.B_RESTITUTION; else b.vh = 0;
+    const f = Math.max(0, 1 - C.B_FRICTION * dt); b.vx *= f;
+    if (Math.abs(b.vx) < 4) b.vx = 0;
+  } else { const f = Math.max(0, 1 - C.B_AIRDRAG * dt); b.vx *= f; }
 
-  // ground bounce
-  if (b.z <= 0) {
-    b.z = 0;
-    if (b.vz < -30) { b.vz = -b.vz * C.GROUND_RESTITUTION; }
-    else b.vz = 0;
-    // rolling friction
-    const f = Math.max(0, 1 - C.GROUND_FRICTION * dt);
-    b.vx *= f; b.vy *= f;
-    if (len(b.vx, b.vy) < 5) { b.vx = 0; b.vy = 0; }
-  } else {
-    // mild air drag
-    const f = Math.max(0, 1 - C.AIR_DRAG * dt);
-    b.vx *= f; b.vy *= f;
-  }
+  // end walls: bounce only above the crossbar (below = it's a goal, handled elsewhere)
+  if (b.x < C.B_RADIUS && b.h >= C.CROSSBAR_H) { b.x = C.B_RADIUS; b.vx = Math.abs(b.vx) * 0.5; }
+  if (b.x > C.WORLD_W - C.B_RADIUS && b.h >= C.CROSSBAR_H) { b.x = C.WORLD_W - C.B_RADIUS; b.vx = -Math.abs(b.vx) * 0.5; }
+  b.x = clamp(b.x, -40, C.WORLD_W + 40);
 
-  // wall bounce (top/bottom always; left/right except goal mouth)
-  if (b.y < C.WALL + C.B_RADIUS) { b.y = C.WALL + C.B_RADIUS; b.vy = Math.abs(b.vy) * 0.6; }
-  if (b.y > C.FIELD_H - C.WALL - C.B_RADIUS) { b.y = C.FIELD_H - C.WALL - C.B_RADIUS; b.vy = -Math.abs(b.vy) * 0.6; }
-  const inGoalMouth = b.y > C.GOAL_TOP && b.y < C.GOAL_BOT;
-  if (b.x < C.WALL + C.B_RADIUS && !(inGoalMouth && b.z < C.CROSSBAR_Z)) { b.x = C.WALL + C.B_RADIUS; b.vx = Math.abs(b.vx) * 0.6; }
-  if (b.x > C.FIELD_W - C.WALL - C.B_RADIUS && !(inGoalMouth && b.z < C.CROSSBAR_Z)) { b.x = C.FIELD_W - C.WALL - C.B_RADIUS; b.vx = -Math.abs(b.vx) * 0.6; }
-
-  // collection. fast-moving shots are hard to corral (gives shooters a chance vs keepers)
-  if (game.kickoffTimer <= 0) {
-    const speed = len(b.vx, b.vy);
-    const grabR = speed > 320 ? C.COLLECT_RADIUS * 0.55 : C.COLLECT_RADIUS;
-    let best = null, bestD = 1e9;
-    for (const p of game.players) {
-      if (p.stun > 0) continue;
-      if (!canCollect(game, p)) continue;
-      const d = len(b.x - p.x, b.y - p.y);
-      if (d < grabR && b.z < C.COLLECT_HEIGHT && d < bestD) { best = p; bestD = d; }
-    }
-    if (best) giveBall(game, best, false);
-  }
-}
-
-function resolvePlayerCollisions(game) {
-  const ps = game.players;
-  for (let i = 0; i < ps.length; i++) {
-    for (let j = i + 1; j < ps.length; j++) {
-      const a = ps[i], b = ps[j];
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const d = len(dx, dy);
-      const min = C.P_RADIUS * 2;
-      if (d > 0 && d < min) {
-        const push = (min - d) / 2;
-        const nx = dx / d, ny = dy / d;
-        // downed players get shoved more, standing ones resist
-        a.x -= nx * push; a.y -= ny * push;
-        b.x += nx * push; b.y += ny * push;
-        confinePlayer(a); confinePlayer(b);
+  // passive pickup of a slow loose ball
+  if (game.kickoff <= 0) {
+    const sp = Math.abs(b.vx);
+    if (sp < C.COLLECT_VMAX) {
+      let best = null, bd = 1e9;
+      for (const p of game.players) {
+        if (p.stun > 0 || p.kickImm > 0) continue;
+        if (b.immTeam === p.team && b.immTimer > 0) continue;
+        // is the ball within reach of one of this player's stance heights?
+        const stanceNear = nearestStance(b.h);
+        if (absd(b.h, stanceH(stanceNear)) > C.HMATCH + 12) continue;
+        const d = absd(b.x, p.x);
+        if (d < C.COLLECT_R && d < bd) { best = p; bd = d; best._st = stanceNear; }
       }
+      if (best) giveBall(game, best, best._st);
     }
   }
 }
+function nearestStance(h) {
+  let bi = 0, bd = 1e9;
+  for (let i = 0; i < 3; i++) { const d = absd(h, C.STANCE_H[i]); if (d < bd) { bd = d; bi = i; } }
+  return bi;
+}
 
-function checkGoals(game) {
-  const b = game.ball;
-  if (b.z >= C.CROSSBAR_Z) return;
-  if (!(b.y > C.GOAL_TOP && b.y < C.GOAL_BOT)) return;
-  let scorer = -1;
-  if (b.x <= C.WALL + 2) scorer = 1;             // into team 0's goal -> team 1 scores
-  else if (b.x >= C.FIELD_W - C.WALL - 2) scorer = 0; // into team 1's goal -> team 0 scores
-  if (scorer >= 0) {
-    game.score[scorer]++;
-    game.flash = { text: 'GOAL!', t: 2.2 };
-    resetKickoff(game, scorer === 0 ? 1 : 0);
+function separate(game) {
+  const ps = game.players;
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const a = ps[i], c = ps[j];
+    if (absd(a.h, c.h) > C.P_H) continue;
+    const dx = c.x - a.x, d = Math.abs(dx), min = C.P_RADIUS * 2;
+    if (d > 0.01 && d < min) { const push = (min - d) / 2 * sign(dx); a.x -= push; c.x += push; confine(a); confine(c); }
   }
 }
 
-// ---------------------------------------------------------------------------
-// NPC AI  (writes into p.input so it shares the same movement code)
-// ---------------------------------------------------------------------------
-function setMoveTo(p, tx, ty, deadzone) {
-  const dx = tx - p.x, dy = ty - p.y;
-  const d = len(dx, dy);
-  const dz = deadzone || 6;
-  p.input.up = dy < -dz;
-  p.input.down = dy > dz;
-  p.input.left = dx < -dz;
-  p.input.right = dx > dz;
-  return d;
+function checkGoal(game) {
+  const b = game.ball;
+  if (b.owner !== null || b.h >= C.CROSSBAR_H) return;
+  let scorer = -1;
+  if (b.x <= C.GOAL_L) scorer = 1;
+  else if (b.x >= C.GOAL_R) scorer = 0;
+  if (scorer < 0) return;
+  game.score[scorer]++;
+  if (game.score[scorer] >= C.GOAL_TARGET) { game.over = true; game.winner = scorer; game.flash = { text: 'GOAL!', t: 2.5 }; }
+  else { game.flash = { text: 'GOAL!', t: 2.0 }; resetKickoff(game); }
 }
 
-function clearActions(p) { p.input.primary = false; p.input.special = false; }
-
+// ---------------------------------------------------------------------------
+// NPC AI
+// ---------------------------------------------------------------------------
+function clearAI(p) { const i = p.input; i.left = i.right = i.jump = i.up = i.down = i.act = i.bike = false; }
+function pressTowardStance(p, target) {
+  // set stance directly (NPCs don't need edge wiggling), but keep within rules
+  if (p.ai.stanceCd > 0) return;
+  if (p.stance < target) { p.stance++; p.stanceTimer = C.STANCE_SETTLE; p.ai.stanceCd = 0.12; }
+  else if (p.stance > target) { p.stance--; p.stanceTimer = C.STANCE_SETTLE; p.ai.stanceCd = 0.12; }
+}
 function aiThink(game, p, dt) {
-  clearActions(p);
-  if (p.stun > 0 || p.stateTimer > 0) { p.input.up = p.input.down = p.input.left = p.input.right = false; return; }
-  if (p.ai.actCd > 0) p.ai.actCd -= dt;
-  if (game.kickoffTimer > 0) { p.input.up = p.input.down = p.input.left = p.input.right = false; return; }
+  clearAI(p);
+  if (p.ai.cd > 0) p.ai.cd -= dt;
+  if (p.ai.stanceCd > 0) p.ai.stanceCd -= dt;
+  if (p.stun > 0 || (p.stateTimer > 0 && ACTION_STATES.has(p.state)) || game.kickoff > 0) return;
 
   const b = game.ball;
-  const goalX = targetGoalX(p.team);
-  const goalY = C.FIELD_H / 2;
-  const owner = b.owner !== null ? findPlayer(game, b.owner) : null;
-  const dBall = len(b.x - p.x, b.y - p.y);
-
-  // role: closest field player to ball on the team becomes the "chaser"
-  const mates = game.players.filter((q) => q.team === p.team);
-  let chaser = mates[0], cd = 1e9;
-  for (const m of mates) { const d = len(b.x - m.x, b.y - m.y); if (d < cd) { cd = d; chaser = m; } }
-  const amChaser = chaser === p;
-  // keeper-ish: the player whose spawn slot is deepest stays back when defending
-  const mateIdx = mates.indexOf(p);
-  const isKeeper = mateIdx === 1; // middle slot guards
+  const dir = C.attackDir(p.team);
+  const goalX = C.targetGoalX(p.team);
+  const owner = b.owner !== null ? findP(game, b.owner) : null;
 
   if (owner && owner.id === p.id) {
-    // won the ball deep in my own third -> clear it upfield instead of dribbling into trouble
-    const ownThird = p.team === 0 ? p.x < C.FIELD_W * 0.34 : p.x > C.FIELD_W * 0.66;
-    if (ownThird && p.ai.actCd <= 0) {
-      p.facing = Math.atan2((goalY + rand(-120, 120)) - p.y, goalX - p.x);
-      p.input.primary = true; // hoof
-      p.ai.actCd = 0.5;
-      return;
-    }
-    // I have the ball -> head to goal, shoot when close, occasionally trickery
-    const d = setMoveTo(p, goalX - attackDir(p.team) * 30, goalY, 6);
-    const distGoal = len(goalX - p.x, goalY - p.y);
-    // aim at a random spot inside the mouth (not always dead-center) so keepers get beaten
-    const aimY = goalY + rand(-C.GOAL_H * 0.32, C.GOAL_H * 0.32);
-    p.facing = Math.atan2(aimY - p.y, goalX - p.x);
-    if (distGoal < 300 && p.ai.actCd <= 0) {
-      if (Math.random() < 0.82) { p.input.primary = true; } // shoot
-      else { p.input.special = true; } // start juggle to set up
-      p.ai.actCd = 0.5;
-    }
-    // if a defender is right on me, sometimes juggle-pop to escape
-    let pressured = false;
-    for (const o of game.players) if (o.team !== p.team && o.stun <= 0 && len(o.x - p.x, o.y - p.y) < 34) pressured = true;
-    if (pressured && p.ai.actCd <= 0 && Math.random() < 0.25) {
-      if (b.juggling) p.input.primary = true; else p.input.special = true;
-      p.ai.actCd = 0.7;
+    // I HAVE THE BALL — drive toward goal
+    p.face = dir;
+    if (dir > 0) p.input.right = true; else p.input.left = true;
+    const distGoal = Math.abs(goalX - p.x);
+    // nearest opponent ahead of me
+    let opp = null, od = 1e9;
+    for (const o of game.players) if (o.team !== p.team && o.stun <= 0) { const dd = (o.x - p.x) * dir; if (dd > -20 && dd < od) { od = dd; opp = o; } }
+    if (p.ai.cd <= 0) {
+      if (distGoal < 320) { p.input.act = true; p.ai.cd = 0.55; }      // shoot at goal
+      else if (opp && od < 70) {
+        const r = Math.random();
+        if (r < 0.5) { p.input.bike = true; p.ai.cd = 0.9; }           // smash past
+        else { pressTowardStance(p, 1 + (Math.random() < 0.5 ? 1 : 0)); p.ai.cd = 0.7; } // raise height to dodge a slide
+      }
     }
   } else if (owner && owner.team === p.team) {
-    // teammate has ball -> spread forward to support
-    const supX = clamp(owner.x + attackDir(p.team) * 120, C.WALL + 40, C.FIELD_W - C.WALL - 40);
-    const supY = clamp(goalY + (mateIdx - 1) * 130, C.WALL + 30, C.FIELD_H - C.WALL - 30);
-    setMoveTo(p, supX, supY, 10);
+    // support: get ahead of the ball toward goal
+    const tx = clamp(owner.x + dir * 150, 30, C.WORLD_W - 30);
+    moveTo(p, tx, 26);
   } else if (owner && owner.team !== p.team) {
-    // opponent has ball -> defend
-    if (amChaser) {
-      const d = setMoveTo(p, b.x, b.y, 4);
-      p.facing = Math.atan2(b.y - p.y, b.x - p.x);
-      if (d < 40 && p.ai.actCd <= 0) {
-        // pick the right tackle: body if they're juggling, slide if dribbling
-        if (b.juggling) p.input.special = true; else p.input.primary = true;
-        p.ai.actCd = 0.8;
-      }
-    } else {
-      // mark space between ball and own goal
-      const ogx = ownGoalX(p.team);
-      const mx = (b.x + ogx) / 2;
-      const my = clamp(b.y + (mateIdx - 1) * 90, C.WALL + 30, C.FIELD_H - C.WALL - 30);
-      setMoveTo(p, mx, my, 10);
-    }
+    // DEFEND — match the carrier's stance and challenge
+    moveTo(p, b.x - p.face * 18, 6);
+    p.face = sign(b.x - p.x) || p.face;
+    pressTowardStance(p, b.stance);
+    if (absd(b.x, p.x) < 46 && p.stance === b.stance && p.ai.cd <= 0) { p.input.act = true; p.ai.cd = 0.6; }
   } else {
-    // loose ball
-    if (amChaser || dBall < 160) {
-      const d = setMoveTo(p, b.x, b.y, 4);
-      p.facing = Math.atan2(b.y - p.y, b.x - p.x);
-    } else {
-      // hold a sensible position
-      const hx = clamp((b.x + (isKeeper ? ownGoalX(p.team) : goalX)) / 2, C.WALL + 40, C.FIELD_W - C.WALL - 40);
-      const hy = clamp(goalY + (mateIdx - 1) * 120, C.WALL + 30, C.FIELD_H - C.WALL - 30);
-      setMoveTo(p, hx, hy, 14);
+    // loose ball — go get it, set stance to its height
+    moveTo(p, b.x, 4);
+    p.face = sign(b.x - p.x) || p.face;
+    pressTowardStance(p, nearestStance(b.h));
+    if (absd(b.x, p.x) < 40 && b.h > C.STANCE_H[1] - 10 && p.stance === nearestStance(b.h) && p.ai.cd <= 0) {
+      p.input.act = true; p.ai.cd = 0.5; // actively win a higher loose ball
     }
   }
 }
+function moveTo(p, tx, dead) {
+  const dx = tx - p.x;
+  if (dx > (dead || 6)) p.input.right = true; else if (dx < -(dead || 6)) p.input.left = true;
+}
 
 // ---------------------------------------------------------------------------
-// Snapshot for clients
+// snapshot
 // ---------------------------------------------------------------------------
-function snapshot(room) {
-  const g = room.game;
+const r1 = (v) => Math.round(v * 10) / 10;
+function snapshot(game) {
   return {
     type: 'state',
-    t: Date.now(),
-    clock: g.clock,
-    score: g.score,
-    over: g.over,
-    kickoff: g.kickoffTimer > 0,
-    flash: g.flash ? g.flash.text : null,
-    ball: { x: r1(g.ball.x), y: r1(g.ball.y), z: r1(g.ball.z), owner: g.ball.owner, juggling: g.ball.juggling },
-    players: g.players.map((p) => ({
+    score: game.score, over: game.over, winner: game.winner, target: C.GOAL_TARGET,
+    kickoff: game.kickoff > 0, flash: game.flash ? game.flash.text : null,
+    ball: { x: r1(game.ball.x), h: r1(game.ball.h), owner: game.ball.owner, stance: game.ball.stance },
+    players: game.players.map((p) => ({
       id: p.id, team: p.team, name: p.name, npc: p.isNPC,
-      x: r1(p.x), y: r1(p.y), z: r1(p.z), f: r2(p.facing), s: p.state, a: r2(p.anim),
-      me: false, // filled per-recipient below
+      x: r1(p.x), h: r1(p.h), f: p.face, st: p.stance, s: p.state, a: r1(p.anim),
     })),
   };
 }
-const r1 = (v) => Math.round(v * 10) / 10;
-const r2 = (v) => Math.round(v * 100) / 100;
 
 // ---------------------------------------------------------------------------
-// Loop management
+// loop
 // ---------------------------------------------------------------------------
 function startMatch(room) {
   if (room.started) return;
-  room.started = true;
-  room.game = createGame(room);
-  broadcast(room, { type: 'start' });
-
-  const dt = 1 / C.TICK_HZ;
-  let last = Date.now();
+  room.started = true; room.game = createGame(room); room.acc = 0;
+  broadcast(room, { type: 'start', perSide: room.perSide });
+  const dt = 1 / C.TICK_HZ; let last = Date.now();
   room.loop = setInterval(() => {
-    const now = Date.now();
-    let acc = (now - last) / 1000;
-    last = now;
-    if (acc > 0.25) acc = 0.25; // avoid spiral of death
-    // fixed steps
-    room._acc = (room._acc || 0) + acc;
-    while (room._acc >= dt) { stepGame(room.game, dt); room._acc -= dt; }
-
-    // send snapshots (each human is told which entity is theirs)
-    const snap = snapshot(room);
-    for (const m of room.members) {
-      if (m.ws.readyState !== 1) continue;
-      // tell each human which entity is theirs
-      m.ws.send(JSON.stringify(Object.assign({}, snap, { youEnt: m.entId || null })));
-    }
-
+    const now = Date.now(); let acc = (now - last) / 1000; last = now; if (acc > 0.25) acc = 0.25;
+    room.acc += acc;
+    while (room.acc >= dt) { stepGame(room.game, dt); room.acc -= dt; }
+    const snap = snapshot(room.game);
+    for (const m of room.members) if (m.ws.readyState === 1) m.ws.send(JSON.stringify(Object.assign({}, snap, { youEnt: m.entId || null })));
     if (room.game.over) {
-      broadcast(room, { type: 'gameover', score: room.game.score });
+      broadcast(room, { type: 'gameover', score: room.game.score, winner: room.game.winner });
       clearInterval(room.loop); room.loop = null;
-      // allow a rematch: reset to lobby after a few seconds
-      setTimeout(() => {
-        if (!rooms.has(room.code)) return;
-        room.started = false; room.game = null; room._acc = 0;
-        broadcast(room, lobbyState(room));
-      }, 6000);
+      setTimeout(() => { if (!rooms.has(room.code)) return; room.started = false; room.game = null; broadcast(room, lobbyState(room)); }, 6000);
     }
   }, 1000 / C.TICK_HZ);
 }
-
-function destroyRoom(room) {
-  if (room.loop) clearInterval(room.loop);
-  rooms.delete(room.code);
-}
+function destroyRoom(room) { if (room.loop) clearInterval(room.loop); rooms.delete(room.code); }
 
 // ---------------------------------------------------------------------------
-// WebSocket handling
+// websocket
 // ---------------------------------------------------------------------------
 wss.on('connection', (ws) => {
-  let member = { ws, name: 'Player', id: nextEntId++, ready: false, entId: null };
+  const member = { ws, name: 'Player', id: nextId++, entId: null, room: null };
   let room = null;
-
   ws.on('message', (raw) => {
-    let msg;
-    try { msg = JSON.parse(raw); } catch (e) { return; }
-
+    let msg; try { msg = JSON.parse(raw); } catch (e) { return; }
     switch (msg.type) {
+      case 'solo': {
+        member.name = (msg.name || 'Player').slice(0, 12);
+        room = createRoom(1); member.room = room; room.members.push(member);
+        ws.send(JSON.stringify(lobbyState(room))); startMatch(room); break;
+      }
       case 'create': {
         member.name = (msg.name || 'Player').slice(0, 12);
-        room = createRoom();
-        member.room = room;
-        room.members.push(member);
-        ws.send(JSON.stringify(lobbyState(room)));
-        break;
+        room = createRoom(msg.perSide === 1 ? 1 : 2); member.room = room; room.members.push(member);
+        ws.send(JSON.stringify(lobbyState(room))); break;
       }
+      case 'mode': { if (room && !room.started && room.members[0] === member) { room.perSide = msg.perSide === 1 ? 1 : 2; broadcast(room, lobbyState(room)); } break; }
       case 'join': {
-        const code = (msg.code || '').toUpperCase();
-        const r = rooms.get(code);
+        const r = rooms.get((msg.code || '').toUpperCase());
         if (!r) { ws.send(JSON.stringify({ type: 'error', msg: 'Lobby not found' })); break; }
         if (r.started) { ws.send(JSON.stringify({ type: 'error', msg: 'Match already started' })); break; }
-        if (r.members.length >= 3) { ws.send(JSON.stringify({ type: 'error', msg: 'Lobby full (max 3)' })); break; }
+        if (r.members.length >= r.perSide * 2) { ws.send(JSON.stringify({ type: 'error', msg: 'Lobby full' })); break; }
         member.name = (msg.name || 'Player').slice(0, 12);
-        room = r; member.room = room;
-        room.members.push(member);
-        broadcast(room, lobbyState(room));
-        break;
+        room = r; member.room = room; room.members.push(member); broadcast(room, lobbyState(room)); break;
       }
-      case 'solo': {
-        // quick play vs NPCs (single-member room, start instantly)
-        member.name = (msg.name || 'Player').slice(0, 12);
-        room = createRoom();
-        member.room = room;
-        room.members.push(member);
-        ws.send(JSON.stringify(lobbyState(room)));
-        startMatch(room);
-        break;
-      }
-      case 'start': {
-        if (room && !room.started) startMatch(room);
-        break;
-      }
+      case 'start': { if (room && !room.started && room.members[0] === member) startMatch(room); break; }
       case 'input': {
         if (!room || !room.game || !member.entId) break;
-        const p = findPlayer(room.game, member.entId);
-        if (!p) break;
+        const p = findP(room.game, member.entId); if (!p) break;
         const i = p.input;
-        i.up = !!msg.up; i.down = !!msg.down; i.left = !!msg.left; i.right = !!msg.right;
-        i.primary = !!msg.primary; i.special = !!msg.special;
-        break;
-      }
-      case 'name': {
-        member.name = (msg.name || 'Player').slice(0, 12);
-        if (room && !room.started) broadcast(room, lobbyState(room));
+        i.left = !!msg.left; i.right = !!msg.right; i.jump = !!msg.jump;
+        i.up = !!msg.up; i.down = !!msg.down; i.act = !!msg.act; i.bike = !!msg.bike;
         break;
       }
     }
   });
-
   ws.on('close', () => {
     if (!room) return;
     room.members = room.members.filter((m) => m !== member);
-    // turn a disconnected human's player into an NPC mid-match
-    if (room.game && member.entId) {
-      const p = findPlayer(room.game, member.entId);
-      if (p) { p.isNPC = true; p.controllerId = null; p.name = 'CPU'; }
-    }
+    if (room.game && member.entId) { const p = findP(room.game, member.entId); if (p) { p.isNPC = true; p.name = 'CPU'; } }
     if (room.members.length === 0) destroyRoom(room);
     else if (!room.started) broadcast(room, lobbyState(room));
   });
 });
 
-// Export internals for testing; only listen when run directly.
-module.exports = {
-  createRoom, createGame, stepGame, resetKickoff, doPrimary, doSpecial,
-  giveBall, findPlayer, tackleProbe, newPlayer, C,
-};
+module.exports = { createRoom, createGame, stepGame, resetKickoff, doAction, doBicycle, giveBall, findP, newPlayer, snapshot, C };
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
-  server.listen(PORT, () => {
-    console.log(`⚽ Pixel Footy server running on http://localhost:${PORT}`);
-  });
+  server.listen(PORT, () => console.log(`⚽ Nidhogg Footy on http://localhost:${PORT}`));
 }

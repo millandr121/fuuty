@@ -1,75 +1,66 @@
 :root{
   --bg:#0a0f0a; --panel:#10231a; --line:#1f5e3a;
-  --grass1:#0e3a1e; --grass2:#0c331b;
-  --teamA:#ffd23f; --teamB:#3fa9ff; --ink:#eafff0;
+  --teamA:#ffd23f; --teamB:#46a8ff; --ink:#eafff0;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
-  background:radial-gradient(circle at 50% 20%,#13241a,#060a07 70%);
-  color:var(--ink);
-  font-family:"Courier New",monospace;
-  display:flex;align-items:center;justify-content:center;
-  overflow:hidden;-webkit-user-select:none;user-select:none;
-  image-rendering:pixelated;
+  background:radial-gradient(circle at 50% 15%,#13243b,#060a07 70%);
+  color:var(--ink);font-family:"Courier New",monospace;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+  -webkit-user-select:none;user-select:none;image-rendering:pixelated;
 }
 #app{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
-.screen{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;padding:20px}
+.screen{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;padding:20px;max-width:640px}
 .hidden{display:none !important}
 
-.logo{font-size:64px;letter-spacing:4px;line-height:.9;text-shadow:4px 4px 0 #062a14}
+.logo{font-size:58px;letter-spacing:3px;line-height:.9;text-shadow:4px 4px 0 #062a14}
 .logo span{display:block;color:var(--teamA);text-shadow:4px 4px 0 #5a3a00}
-.tag{opacity:.8;margin-bottom:6px}
+.tag{opacity:.8}
 
 .panel{background:var(--panel);border:3px solid var(--line);border-radius:10px;padding:18px;width:330px;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 0 #06170d}
 .panel label{font-size:12px;opacity:.7;text-align:left}
 .row{display:flex;gap:8px}
+.modes{justify-content:center}
 .joinrow input{flex:1}
-input{
-  background:#07140d;border:2px solid var(--line);color:var(--ink);
-  font-family:inherit;font-size:16px;padding:10px;border-radius:6px;width:100%;text-transform:uppercase;
-}
+input{background:#07140d;border:2px solid var(--line);color:var(--ink);font-family:inherit;font-size:16px;padding:10px;border-radius:6px;width:100%;text-transform:uppercase}
 input::placeholder{color:#4b7d60;text-transform:none}
 #codeInput{text-align:center;letter-spacing:6px;font-size:22px}
 
-button{
-  cursor:pointer;font-family:inherit;font-weight:bold;color:#06170d;
-  background:var(--teamA);border:none;border-radius:6px;padding:12px 14px;font-size:15px;
-  box-shadow:0 4px 0 #8a6d00;transition:transform .05s, box-shadow .05s;flex:1;
-}
+button{cursor:pointer;font-family:inherit;font-weight:bold;color:#06170d;background:var(--teamA);border:none;border-radius:6px;padding:12px 14px;font-size:15px;box-shadow:0 4px 0 #8a6d00;transition:transform .05s, box-shadow .05s;flex:1}
 button:active{transform:translateY(3px);box-shadow:0 1px 0 #8a6d00}
 button.big{font-size:18px;padding:14px}
 button small{font-weight:normal;opacity:.7}
-button.ghost{background:#1c3a2a;color:var(--ink);box-shadow:0 4px 0 #0a2316;flex:0 0 auto;padding:12px 18px}
+button.ghost{background:#1c3a2a;color:var(--ink);box-shadow:0 4px 0 #0a2316;flex:0 0 auto;padding:12px 22px}
+button.ghost.on{background:var(--teamB);color:#06170d;box-shadow:0 4px 0 #1a5a8a}
 
 .err{color:#ff6b6b;min-height:18px;font-size:13px}
-.how{margin-top:10px;font-size:13px;opacity:.85;line-height:1.7;text-align:center}
+.how{margin-top:8px;font-size:13px;opacity:.9;line-height:1.6;max-width:560px}
 .how b{color:var(--teamB)}
-kbd{background:#08160e;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:12px}
+.ctrls{display:flex;flex-wrap:wrap;gap:10px 16px;justify-content:center;margin-top:10px}
+.ctrls span{white-space:nowrap}
+kbd{background:#08160e;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:12px;margin:0 1px}
 
 .code{color:var(--teamA);letter-spacing:6px}
-.hint{opacity:.7;font-size:13px;max-width:380px}
+.hint{opacity:.75;font-size:13px}
 #playerList{list-style:none;width:320px;display:flex;flex-direction:column;gap:8px}
 #playerList li{background:var(--panel);border:2px solid var(--line);border-radius:6px;padding:10px 14px;text-align:left;display:flex;justify-content:space-between}
 #playerList li .tagteam{font-size:11px;opacity:.7}
 
 #game{padding:0;width:100%;height:100%;justify-content:center}
-canvas{
-  background:#0c331b;border:4px solid #07150d;border-radius:6px;
-  max-width:100%;max-height:100%;image-rendering:pixelated;
-  box-shadow:0 0 0 2px #1f5e3a, 0 12px 40px rgba(0,0,0,.6);
-}
+canvas{background:#0c331b;border:4px solid #07150d;border-radius:6px;max-width:100%;max-height:100%;image-rendering:pixelated;box-shadow:0 0 0 2px #1f5e3a,0 12px 40px rgba(0,0,0,.6)}
 
-.bigscore{font-size:72px;letter-spacing:8px;color:var(--teamA)}
-#overTitle{font-size:40px;letter-spacing:4px}
+.bigscore{font-size:68px;letter-spacing:8px;color:var(--teamA)}
+#overTitle{font-size:40px;letter-spacing:3px}
 
-/* touch controls */
+/* touch */
 #touch{position:fixed;inset:0;pointer-events:none}
-#stick{position:absolute;left:24px;bottom:24px;width:120px;height:120px;border-radius:50%;
-  background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.2);pointer-events:auto}
-#nub{position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.35)}
-#btns{position:absolute;right:24px;bottom:24px;display:flex;gap:16px;pointer-events:auto}
-.tbtn{width:74px;height:74px;border-radius:50%;font-size:24px;flex:0 0 auto}
-#btnB{background:var(--teamB);box-shadow:0 4px 0 #1a5a8a}
+.tpad{position:absolute;bottom:20px;display:flex;gap:12px;pointer-events:auto}
+.tpad.left{left:20px}
+.tpad.stance{left:50%;transform:translateX(-50%);flex-direction:column}
+.tpad.right{right:20px}
+.tbtn{width:70px;height:70px;border-radius:14px;font-size:18px;flex:0 0 auto;background:rgba(255,210,63,.85)}
+.tbtn.sm{width:56px;height:48px;font-size:14px;background:rgba(255,255,255,.25);color:#fff}
+#tBike{background:rgba(70,168,255,.9)}
 
-@media (max-width:700px){ .logo{font-size:44px} }
+@media (max-width:700px){ .logo{font-size:40px} }
