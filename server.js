@@ -74,13 +74,15 @@ function createGame(room) {
   const players = [];
   let t0 = 0, t1 = 0;
   for (const m of room.members) {
-    const team = t0 <= t1 ? 0 : 1; if (team === 0) t0++; else t1++;
+    const team = room.practice ? 0 : (t0 <= t1 ? 0 : 1); if (team === 0) t0++; else t1++;
     const p = newPlayer(team, false, m.name, m.id); players.push(p); m.entId = p.id;
   }
-  while (t0 < perSide) { players.push(newPlayer(0, true, 'CPU')); t0++; }
-  while (t1 < perSide) { players.push(newPlayer(1, true, 'CPU')); t1++; }
+  if (!room.practice) { // practice = just you and the ball, no opponents
+    while (t0 < perSide) { players.push(newPlayer(0, true, 'CPU')); t0++; }
+    while (t1 < perSide) { players.push(newPlayer(1, true, 'CPU')); t1++; }
+  }
   const game = {
-    perSide, players,
+    perSide, practice: !!room.practice, players,
     ball: { x: C.WORLD_W / 2, h: 60, vx: 0, vh: 0, touch: -1 },
     score: [0, 0], over: false, winner: -1, kickoff: 1.0, flash: null,
   };
@@ -177,7 +179,7 @@ function doHit(game, p, power) {
   let fwd = C.HIT_FWD_MIN + power * (C.HIT_FWD_MAX - C.HIT_FWD_MIN);
   if (p.stance === 0) { fwd *= 1.18; up *= 0.92; p.state = C.S_KICK; }       // foot: drive
   else if (p.stance === 1) { fwd *= 0.72; up *= 1.08; p.state = C.S_KNEE; }  // knee: control pop
-  else { fwd *= 1.0; up *= 0.82; p.state = C.S_HEAD; p.vh = C.HOP_VH; p.grounded = false; } // head: little hop
+  else { fwd *= 1.0; up *= 0.82; p.state = C.S_HEAD; if (p.grounded) { p.vh = C.HOP_VH; p.grounded = false; } } // head: little hop, only from the ground
   b.vx = p.face * fwd; b.vh = up; b.touch = p.team;
   p.stateTimer = 0.2; p.hitCd = C.HIT_CD;
   return true;
@@ -218,7 +220,7 @@ function checkGoal(game) {
   else if (b.x >= C.GOAL_R) scorer = 0;
   if (scorer < 0) return;
   game.score[scorer]++;
-  if (game.score[scorer] >= C.GOAL_TARGET) { game.over = true; game.winner = scorer; game.flash = { text: 'GOAL!', t: 2.5 }; }
+  if (!game.practice && game.score[scorer] >= C.GOAL_TARGET) { game.over = true; game.winner = scorer; game.flash = { text: 'GOAL!', t: 2.5 }; }
   else { game.flash = { text: 'GOAL!', t: 2.0 }; resetKickoff(game); }
 }
 
@@ -335,6 +337,7 @@ wss.on('connection', (ws) => {
     let msg; try { msg = JSON.parse(raw); } catch (e) { return; }
     switch (msg.type) {
       case 'solo': { member.name = (msg.name || 'Player').slice(0, 12); room = createRoom(1); member.room = room; room.members.push(member); ws.send(JSON.stringify(lobbyState(room))); startMatch(room); break; }
+      case 'practice': { member.name = (msg.name || 'Player').slice(0, 12); room = createRoom(1); room.practice = true; member.room = room; room.members.push(member); ws.send(JSON.stringify(lobbyState(room))); startMatch(room); break; }
       case 'create': { member.name = (msg.name || 'Player').slice(0, 12); room = createRoom(msg.perSide === 1 ? 1 : 2); member.room = room; room.members.push(member); ws.send(JSON.stringify(lobbyState(room))); break; }
       case 'mode': { if (room && !room.started && room.members[0] === member) { room.perSide = msg.perSide === 1 ? 1 : 2; broadcast(room, lobbyState(room)); } break; }
       case 'join': {

@@ -38,6 +38,7 @@ const buildEl = $('build'); if (buildEl) buildEl.textContent = C.BUILD;
 const nameInput = $('nameInput');
 nameInput.value = localStorage.getItem('pf_name') || '';
 const myName = () => { const n = (nameInput.value || 'player').trim().slice(0, 12) || 'player'; localStorage.setItem('pf_name', n); return n; };
+$('btnPractice').onclick = () => connect(() => send({ type: 'practice', name: myName() }));
 $('btnSolo').onclick = () => connect(() => send({ type: 'solo', name: myName() }));
 $('btnCreate').onclick = () => connect(() => send({ type: 'create', name: myName(), perSide: createdMode }));
 $('btnJoin').onclick = () => {
