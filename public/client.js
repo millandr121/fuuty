@@ -67,10 +67,7 @@ function showOver(m) { show('over'); $('overTitle').textContent = (m.winner === 
 const input = { left: false, right: false, up: false, down: false, act: false };
 let lastSent = '';
 function pushInput() { const s = JSON.stringify(input); if (s !== lastSent) { lastSent = s; send(Object.assign({ type: 'input' }, input)); } }
-const keyMap = {
-  KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
-  KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', Space: 'act',
-};
+const keyMap = { KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', Space: 'act' };
 addEventListener('keydown', (e) => {
   const k = keyMap[e.code]; if (!k) return;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
@@ -110,8 +107,11 @@ function view() {
 // ---------------------------------------------------------------------------
 // camera + transform
 // ---------------------------------------------------------------------------
-const TEAM = [{ shirt: '#ffd23f', dark: '#9a6e08', short: '#3a2c00' }, { shirt: '#46a8ff', dark: '#1d6fbf', short: '#06294a' }];
-const SKIN = '#f0bd92';
+const TEAM = [
+  { shirt: '#ffd23f', dark: '#c79410', short: '#243', sock: '#fff0b0' },
+  { shirt: '#46a8ff', dark: '#1f6fc0', short: '#163', sock: '#cfe6ff' },
+];
+const SKIN = '#e7b48a', SKIN_D = '#c9905f', HAIR = '#3a2a1c', OUT = '#15202b';
 let camX = C.WORLD_W / 2, Z = 2, groundY = 400, cw = 960, ch = 540;
 function resize() {
   cw = cv.width = Math.max(480, Math.floor(cv.clientWidth || window.innerWidth));
@@ -131,7 +131,6 @@ function draw() {
   const v = view(); if (!v) return;
   const half = visW() / 2;
   camX += (Math.max(half, Math.min(C.WORLD_W - half, v.ball.x)) - camX) * 0.12;
-
   drawBackground(); drawPitch(); drawGoal(0); drawGoal(C.WORLD_W);
   for (const p of v.players) drawPlayer(p, p.id === myEnt);
   drawBall(v.ball);
@@ -139,87 +138,139 @@ function draw() {
   drawHUD(v);
 }
 
+// ---------------------------------------------------------------------------
+// pixel-art world
+// ---------------------------------------------------------------------------
+function rect(c, x, y, w, h) { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, Math.ceil(w), Math.ceil(h)); }
+function hash(n) { n = (n << 13) ^ n; return ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff) / 0x7fffffff; }
+
 function drawBackground() {
-  const g = ctx.createLinearGradient(0, 0, 0, groundY);
-  g.addColorStop(0, '#101f33'); g.addColorStop(1, '#284862');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, cw, ch);
-  ctx.fillStyle = 'rgba(255,255,255,.16)';
-  for (let i = 0; i < 50; i++) { const x = ((i * 167 - camX * 0.15) % cw + cw) % cw; ctx.fillRect(x, 18 + (i * 47) % (groundY * 0.5), 2, 2); }
-  const standH = Math.max(80, groundY * 0.32), py = groundY - standH;
-  ctx.fillStyle = '#0d1c2c'; ctx.fillRect(0, py, cw, standH);
-  const off = -(camX * 0.35) % 70;
-  const crowd = ['#1d3b56', '#34597e', '#7a4a4a', '#4a6f4a'];
-  for (let x = off - 70; x < cw; x += 70) {
-    ctx.fillStyle = '#15293c'; ctx.fillRect(x, py, 62, standH * 0.55);
-    for (let cx = x + 4; cx < x + 60; cx += 10) for (let cy = py + 8; cy < py + standH * 0.46; cy += 10) {
-      ctx.fillStyle = crowd[(((cx * 7 + cy * 13) | 0) % crowd.length + crowd.length) % crowd.length]; ctx.fillRect(cx, cy, 4, 4);
+  // dusk sky in chunky bands
+  const bands = ['#20243f', '#2c3358', '#3b4d72', '#5b6f8f', '#9a8aa0', '#d59a73'];
+  const bh = groundY / bands.length;
+  for (let i = 0; i < bands.length; i++) rect(bands[i], 0, i * bh, cw, bh + 1);
+  // moon
+  const mx = ((-camX * 0.05) % (cw + 200) + cw + 200) % (cw + 200) - 100;
+  rect('#f3ead0', mx, groundY * 0.16, 22, 22); rect('#20243f', mx + 14, groundY * 0.14, 10, 10);
+  // chunky clouds (parallax)
+  for (let i = 0; i < 6; i++) {
+    const cxp = ((i * 521 - camX * 0.12) % (cw + 260) + cw + 260) % (cw + 260) - 130;
+    const cyp = 30 + (i * 37) % (groundY * 0.4), s = 6 + (i % 3) * 2;
+    rect('#cfd6e4', cxp, cyp, s * 6, s); rect('#cfd6e4', cxp + s, cyp - s, s * 4, s); rect('#aeb8cc', cxp + s, cyp + s, s * 5, s);
+  }
+  // floodlights every ~700 world units
+  for (let wx = 200; wx < C.WORLD_W; wx += 720) {
+    const x = WX(wx); if (x < -40 || x > cw + 40) continue;
+    const topY = groundY - 230 * Z, poleW = Math.max(3, 4 * Z * .5);
+    rect('#2b3344', x - poleW / 2, topY, poleW, groundY - topY);
+    rect('#cfd6e4', x - 16, topY - 14, 32, 16); rect('#fffbe0', x - 13, topY - 11, 26, 10);
+    ctx.fillStyle = 'rgba(255,250,200,.10)'; ctx.beginPath(); ctx.moveTo(x, topY); ctx.lineTo(x - 120, groundY); ctx.lineTo(x + 120, groundY); ctx.fill();
+  }
+  // tiered stand + pixel crowd
+  const standH = Math.max(70, groundY * 0.3), py = groundY - standH;
+  rect('#222a3a', 0, py, cw, standH);
+  rect('#2b3447', 0, py, cw, standH * 0.5);
+  const block = Math.max(4, Math.round(2.4 * Z));
+  for (let sx = -((camX * 0.4) % (block * 2)); sx < cw; sx += block) {
+    for (let sy = py + block; sy < groundY - block * 1.5; sy += block) {
+      const r = hash((((sx + camX * 0.4) / block) | 0) * 131 + ((sy / block) | 0) * 977);
+      if (r < 0.55) continue;
+      const pal = ['#d65a5a', '#5ad68a', '#5a8ad6', '#e0c14a', '#c569d6', '#e9e9ef'];
+      rect(pal[(r * 997 | 0) % pal.length], sx, sy, block - 1, block - 1);
     }
   }
-}
-function drawPitch() {
-  ctx.fillStyle = '#0e3a1e'; ctx.fillRect(0, groundY, cw, ch - groundY);
-  for (let wx = 0; wx < C.WORLD_W; wx += 90) { const x = WX(wx), w = 90 * Z; if (x + w < 0 || x > cw) continue; ctx.fillStyle = ((wx / 90) | 0) % 2 ? '#0d3a1d' : '#0b3319'; ctx.fillRect(x, groundY, w + 1, ch - groundY); }
-  ctx.fillStyle = '#1f7a3e'; ctx.fillRect(0, groundY - 2, cw, 3);
-  const hx = WX(C.WORLD_W / 2); ctx.strokeStyle = 'rgba(220,255,230,.32)'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(hx, groundY); ctx.lineTo(hx, groundY - 60 * Z); ctx.stroke();
-}
-function drawGoal(worldX) {
-  const x = WX(worldX), top = WY(C.CROSSBAR_H), dir = worldX === 0 ? 1 : -1, depth = C.GOAL_DEPTH * Z;
-  ctx.strokeStyle = '#eafff0'; ctx.lineWidth = Math.max(3, 2 * Z);
-  ctx.beginPath(); ctx.moveTo(x, groundY); ctx.lineTo(x, top); ctx.lineTo(x + dir * depth, top); ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,255,255,.2)'; ctx.lineWidth = 1;
-  for (let yy = top; yy < groundY; yy += 11) { ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + dir * depth, yy + 5); ctx.stroke(); }
-  for (let k = 0; k <= depth; k += 11) { ctx.beginPath(); ctx.moveTo(x + dir * k, top); ctx.lineTo(x + dir * k, groundY); ctx.stroke(); }
+  rect('#161d2a', 0, groundY - standH * 0.18, cw, standH * 0.18); // wall in front of stand
 }
 
-// ---- rounded little mascot ----
-function ell(c, x, y, rx, ry) { ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
+function drawPitch() {
+  rect('#2f7d3a', 0, groundY, cw, ch - groundY);
+  for (let wx = 0; wx < C.WORLD_W; wx += 64) {
+    const x = WX(wx), w = 64 * Z; if (x + w < 0 || x > cw) continue;
+    rect(((wx / 64) | 0) % 2 ? '#2f7d3a' : '#2a7234', x, groundY, w + 1, ch - groundY);
+  }
+  rect('#eafff0', 0, groundY - 3, cw, 3);                 // touchline
+  // sparse grass texture
+  const gb = Math.max(3, Math.round(2 * Z));
+  for (let x = -((camX * Z) % (gb * 5)); x < cw; x += gb * 5)
+    for (let y = groundY + gb * 2; y < ch; y += gb * 4) {
+      if (hash(((x + camX * Z) | 0) * 31 + (y | 0) * 17) > 0.7) rect('#256a2e', x, y, gb, gb);
+    }
+  // penalty boxes
+  for (const gx of [C.GOAL_L, C.GOAL_R]) { const dir = gx < C.WORLD_W / 2 ? 1 : -1; const bx = WX(gx + dir * 150);
+    ctx.strokeStyle = 'rgba(234,255,240,.45)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx, groundY); ctx.lineTo(bx, groundY - 70 * Z); ctx.stroke(); }
+  const hx = WX(C.WORLD_W / 2);
+  ctx.strokeStyle = 'rgba(234,255,240,.4)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(hx, groundY); ctx.lineTo(hx, groundY - 64 * Z); ctx.stroke();
+}
+
+function drawGoal(worldX) {
+  const x = WX(worldX), top = WY(C.CROSSBAR_H), dir = worldX === 0 ? 1 : -1, depth = C.GOAL_DEPTH * Z, postW = Math.max(3, 2.4 * Z);
+  rect('#16202b', x - postW / 2, top - 2, postW + 2, groundY - top + 2);   // post shadow
+  rect('#f4fff8', x - postW / 2, top, postW, groundY - top);                // post
+  rect('#f4fff8', x, top - postW, dir * depth, postW);                       // crossbar
+  ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.lineWidth = 1;
+  for (let yy = top; yy < groundY; yy += Math.max(6, 4 * Z)) { ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + dir * depth, yy + 4); ctx.stroke(); }
+  for (let k = 0; Math.abs(k) <= depth; k += Math.max(6, 4 * Z)) { ctx.beginPath(); ctx.moveTo(x + dir * k, top); ctx.lineTo(x + dir * k, groundY); ctx.stroke(); }
+}
+
+// ---------------------------------------------------------------------------
+// pixel-art player
+// ---------------------------------------------------------------------------
+// blk = a filled block with a 1u dark outline, for a chunky pixel-art read
+function blk(c, x, y, w, h) { rect(OUT, x - 1, y - 1, w + 2, h + 2); rect(c, x, y, w, h); }
 function drawPlayer(p, isMe) {
   const col = TEAM[p.team];
   const X = WX(p.x), Y = WY(p.h);
-  const ssc = Math.max(0.4, 1 - p.h / 140);
-  ctx.fillStyle = 'rgba(0,0,0,.30)'; ctx.beginPath(); ctx.ellipse(X, groundY + 2 * Z, 15 * Z * ssc, 4.5 * Z * ssc, 0, 0, Math.PI * 2); ctx.fill();
+  // shadow
+  const ssc = Math.max(0.4, 1 - p.h / 150);
+  ctx.fillStyle = 'rgba(0,0,0,.30)'; ctx.beginPath(); ctx.ellipse(X, groundY + 2 * Z, 13 * Z * ssc, 4 * Z * ssc, 0, 0, Math.PI * 2); ctx.fill();
 
   ctx.save(); ctx.translate(X, Y); ctx.scale((p.f || 1) * Z, Z); // local = world units, forward = +x, up = -y
-  const ph = p.a * 9, sw = Math.sin(ph) * 3.5;
+  const ph = p.a * 9, sw = Math.sin(ph) * 3;
 
-  // pose: feet positions [backX, frontX, frontY], body bob/lean/tilt, squash
-  let footB = -5, footF = 4, footFy = 0, bob = 0, lean = 0, tilt = 0, squash = 1, eyeUp = 0;
+  // pose: front leg [hipX, kneeY, footX, footY], plus bob/lean/head
+  let bob = 0, lean = 0, headDY = 0, armFY = 0, armBY = 0;
+  let bLegX = -4 - sw, fLeg = [3 + sw, -10, 3 + sw, 0];   // [thighX, kneeY, footX, footY]
   switch (p.s) {
-    case C.S_RUN: footB = -5 - sw; footF = 4 + sw; bob = Math.abs(Math.sin(ph)) * 2; lean = 2; break;
-    case C.S_IDLE: { const s = Math.sin(p.a * 2.2); squash = 1 + s * 0.04; bob = Math.max(0, s) * 0.6; break; }
-    case C.S_KICK: footF = 12; footFy = -8; lean = 3; squash = 1.04; break;       // foot kicks up-forward
-    case C.S_KNEE: footF = 6; footFy = -24; lean = 1; eyeUp = -2; break;          // knee/foot raised to mid
-    case C.S_HEAD: tilt = -0.16; eyeUp = -3; squash = 1.05; break;                // header (hop via p.h)
-    case C.S_WHIFF: squash = 0.9; lean = -3; footF = 9; break;
-    case C.S_AIR: footB = -3; footF = 3; footFy = -3; break;
+    case C.S_RUN: bob = Math.abs(Math.sin(ph)) * 1.6; lean = 2; armFY = sw * 2; armBY = -sw * 2; break;
+    case C.S_IDLE: bLegX = -4; fLeg = [3, -10, 3, 0]; bob = Math.sin(p.a * 2) * 0.7; break;
+    case C.S_KICK: fLeg = [5, -9, 12, -7]; lean = 3; armFY = -4; break;     // foot kicks forward-up
+    case C.S_KNEE: fLeg = [4, -22, 5, -16]; lean = 1; armFY = 3; headDY = -1; break; // knee up to the ball
+    case C.S_HEAD: headDY = -4; lean = -2; armFY = -6; armBY = -6; bob = 1; break;   // header (hop via p.h)
+    case C.S_WHIFF: fLeg = [6, -8, 11, -2]; lean = -3; break;
+    case C.S_AIR: bLegX = -2; fLeg = [3, -13, 1, -8]; armFY = -6; armBY = -6; break;
   }
-  if (p.ch > 0.02) { squash = 0.9 - p.ch * 0.06; bob = 0; }   // crouch/anticipate while charging
+  if (p.ch > 0.02) { bob = -1; lean = -2 - p.ch * 2; }   // wind-up crouch while charging
+  ctx.translate(lean, -bob);
 
-  ctx.translate(lean, -bob); ctx.rotate(tilt);
-  ctx.scale(2 - squash, squash);   // squash & stretch around the feet
+  // back arm (behind torso)
+  blk(SKIN_D, -8, -36 + armBY, 3, 11);
+  // back leg
+  blk(col.sock, bLegX, -10, 4, 8); blk(col.short, bLegX, -20, 4, 11); rect(OUT, bLegX - 1, -2, 6, 3); rect('#1d2630', bLegX - 1, -2, 6, 3);
+  // shorts + jersey (torso)
+  blk(col.short, -7, -24, 14, 7);
+  blk(col.shirt, -7, -40, 14, 17);
+  rect(col.dark, -7, -40, 14, 4);          // collar/shade
+  rect('rgba(255,255,255,.14)', -6, -39, 4, 14); // sheen
+  // front leg (over torso)
+  blk(col.short, fLeg[0] - 2, -20, 4, Math.max(4, -10 - fLeg[1] + 14)); // thigh down from hip
+  blk(col.sock, fLeg[2] - 2, fLeg[1], 4, Math.max(5, fLeg[3] - fLeg[1] + 10));
+  rect(OUT, fLeg[2] - 3, fLeg[3] - 1, 7, 4); rect('#222c37', fLeg[2] - 2, fLeg[3], 6, 3); // boot
+  // front arm
+  blk(SKIN, 5, -36 + armFY, 3, 11);
+  // head
+  blk(SKIN, -5, -53 + headDY, 10, 12);
+  rect(HAIR, -5, -53 + headDY, 10, 4);                 // hair
+  rect(HAIR, -5, -53 + headDY, 3, 7);                  // sideburn
+  rect(OUT, 3, -47 + headDY, 2, 2);                    // eye (forward)
+  rect(SKIN_D, 0, -43 + headDY, 4, 1);                 // mouth/jaw
 
-  // feet (little dark ovals)
-  ell('#22303a', footB, -3, 4, 3);
-  // body — one big rounded blob in team colour
-  ell(col.dark, 0, -23, 13, 23);          // outline-ish darker base
-  ell(col.shirt, 0, -24, 11.5, 21);       // body
-  ell('rgba(255,255,255,.16)', -3, -30, 5, 8); // soft sheen
-  // tiny stub arms
-  ell(col.shirt, -11, -22, 3.5, 5); ell(col.shirt, 11, -22, 3.5, 5);
-  // front foot (over body) — the one that juggles
-  ell('#22303a', footF, -3 + footFy, 4, 3);
-  // face: two eyes looking forward + a little smile
-  ell('#fff', -3.5, -34 + eyeUp, 3, 3.6); ell('#fff', 4.5, -34 + eyeUp, 3, 3.6);
-  ell('#1a2530', -2.5, -34 + eyeUp, 1.4, 1.8); ell('#1a2530', 5.5, -34 + eyeUp, 1.4, 1.8);
-  ctx.strokeStyle = '#7a4a2a'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(1, -27 + eyeUp, 3, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
   ctx.restore();
 
-  // charge bar while winding up
+  // charge bar
   if (p.ch > 0.02) {
     const w = 28, x0 = X - w / 2, y0 = Y - 66 * Z;
-    ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(x0 - 1, y0 - 1, w + 2, 6);
-    ctx.fillStyle = p.ch > 0.85 ? '#ff7a7a' : '#ffd23f'; ctx.fillRect(x0, y0, w * p.ch, 4);
+    rect('rgba(0,0,0,.55)', x0 - 1, y0 - 1, w + 2, 6);
+    rect(p.ch > 0.85 ? '#ff7a7a' : '#ffd23f', x0, y0, w * p.ch, 4);
   }
 }
 
@@ -233,11 +284,11 @@ function drawLabel(p, isMe) {
 }
 function drawBall(b) {
   const X = WX(b.x), cy = WY(b.h + C.B_RADIUS), r = C.B_RADIUS * Z;
-  const ssc = Math.max(0.35, 1 - b.h / 180);
-  ctx.fillStyle = 'rgba(0,0,0,.32)'; ctx.beginPath(); ctx.ellipse(X, groundY + 2 * Z, 8 * Z * ssc, 3 * Z * ssc, 0, 0, Math.PI * 2); ctx.fill();
+  const ssc = Math.max(0.35, 1 - b.h / 170);
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(X, groundY + 2 * Z, 8 * Z * ssc, 3 * Z * ssc, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#fbfbfb'; ctx.beginPath(); ctx.arc(X, cy, r, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#222'; const spin = b.x * 0.06;
-  for (let i = 0; i < 3; i++) { const a = spin + i * 2.1; ctx.beginPath(); ctx.arc(X + Math.cos(a) * r * 0.45, cy + Math.sin(a) * r * 0.45, r * 0.2, 0, Math.PI * 2); ctx.fill(); }
+  for (let i = 0; i < 3; i++) { const a = spin + i * 2.1; ctx.beginPath(); ctx.arc(X + Math.cos(a) * r * 0.45, cy + Math.sin(a) * r * 0.45, r * 0.22, 0, Math.PI * 2); ctx.fill(); }
   ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(X, cy, r, 0, Math.PI * 2); ctx.stroke();
 }
 function drawHUD(v) {

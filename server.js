@@ -172,9 +172,10 @@ function doHit(game, p, power) {
   const b = game.ball;
   const zx = p.x + p.face * C.STANCE_OFF[p.stance];
   const zh = stanceH(p.stance);
-  // must be horizontally close, within the vertical cap, AND your stance must match the
-  // ball's height band — so you can't knee/head a ball that's down at your feet.
-  const inZone = absd(b.x, zx) < C.HIT_RX && absd(b.h, zh) < C.HIT_RH && C.nearestStance(b.h) === p.stance;
+  // forgiving: horizontally close and within the vertical window of your stance.
+  // (the window doesn't reach the ground from knee/head, so a grounded ball still
+  // needs a feet kick-up.)
+  const inZone = absd(b.x, zx) < C.HIT_RX && absd(b.h, zh) < C.HIT_RH;
   if (!inZone) { p.state = C.S_WHIFF; p.stateTimer = 0.18; p.hitCd = C.WHIFF_CD; return false; }
 
   let up = C.HIT_UP_MIN + power * (C.HIT_UP_MAX - C.HIT_UP_MIN);
@@ -277,7 +278,7 @@ function aiThink(game, p, dt) {
 
   // attempt a touch when the ball is in range and on its way down
   const zx = p.x + dir * C.STANCE_OFF[p.stance], zh = stanceH(p.stance);
-  const inZone = absd(b.x, zx) < C.HIT_RX * 0.9 && absd(b.h, zh) < C.HIT_RH && C.nearestStance(b.h) === p.stance;
+  const inZone = absd(b.x, zx) < C.HIT_RX * 0.9 && absd(b.h, zh) < C.HIT_RH;
   if (inZone && p.hitCd <= 0 && p.ai.cd <= 0) {
     const distGoal = absd(goalX, p.x);
     let power;

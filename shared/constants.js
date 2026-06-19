@@ -5,7 +5,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   const C = {
     TICK_HZ: 30,
-    BUILD: 'keep-up v7',   // shown on the menu so you can confirm you have the latest
+    BUILD: 'keep-up v8',   // shown on the menu so you can confirm you have the latest
 
     // rendering — canvas fills the window; camera follows the BALL; zoom from height
     VISIBLE_WORLD_H: 260,
@@ -46,12 +46,12 @@
 
     // the juggle hit (Space). hold longer = more power (height + distance).
     CHARGE_MAX: 0.7,        // seconds to full charge
-    HIT_RX: 36,             // horizontal reach of the strike zone
-    HIT_RH: 26,             // vertical cap (the stance must also match the ball's height band)
+    HIT_RX: 38,             // horizontal reach of the strike zone (forgiving)
+    HIT_RH: 27,             // vertical tolerance around the stance height (forgiving)
     HIT_CD: 0.2,            // min time between hits
     WHIFF_CD: 0.24,         // recovery after a mistimed swing
     HIT_UP_MIN: 230, HIT_UP_MAX: 430,    // upward launch (tap..charged)
-    HIT_FWD_MIN: 80, HIT_FWD_MAX: 240,   // forward launch — diagonal so the ball runs with you
+    HIT_FWD_MIN: 22, HIT_FWD_MAX: 120,   // forward launch — gentle diagonal, stays near you
     DEAD_VX: 22,            // below this horizontal speed a grounded ball is "dead"
 
     // states the client renders
