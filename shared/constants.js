@@ -5,7 +5,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   const C = {
     TICK_HZ: 30,
-    BUILD: 'keep-up v5',   // shown on the menu so you can confirm you have the latest
+    BUILD: 'keep-up v6',   // shown on the menu so you can confirm you have the latest
 
     // rendering — canvas fills the window; camera follows the BALL; zoom from height
     VISIBLE_WORLD_H: 260,
@@ -25,8 +25,8 @@
     // players (calmer keep-away pace)
     P_W: 18, P_H: 54,
     P_RADIUS: 13,
-    P_SPEED: 150,
-    P_ACCEL: 1200,
+    P_SPEED: 132,
+    P_ACCEL: 1050,
     GRAVITY: 1500,          // for the little header hop
     HOP_VH: 230,            // header pops the player up a touch
 
@@ -38,20 +38,20 @@
     // ball — bounces die quickly, rolls stop fast, stays low (no scoring from half,
     // and juggling keeps it close to you rather than flying away)
     B_RADIUS: 7,
-    B_GRAVITY: 1250,        // softer fall: more time to react and pops reach head height
+    B_GRAVITY: 1050,        // floatier: slower fall, more hang time
     B_RESTITUTION: 0.32,
     B_FRICTION: 3.0,
     B_AIRDRAG: 0.1,
-    B_HMAX: 135,            // cap height so pops stay readable, not "flying"
+    B_HMAX: 140,            // cap height so pops stay readable
 
     // the juggle hit (Space). hold longer = more power (height + distance).
     CHARGE_MAX: 0.7,        // seconds to full charge
-    HIT_RX: 36,             // horizontal reach of the strike zone (forgiving)
-    HIT_RH: 22,             // vertical tolerance around the stance height (forgiving)
+    HIT_RX: 36,             // horizontal reach of the strike zone
+    HIT_RH: 26,             // vertical cap (the stance must also match the ball's height band)
     HIT_CD: 0.2,            // min time between hits
     WHIFF_CD: 0.28,         // recovery after a mistimed swing
-    HIT_UP_MIN: 210, HIT_UP_MAX: 400,    // upward launch (tap..charged) — can loft to head
-    HIT_FWD_MIN: 25, HIT_FWD_MAX: 200,   // forward launch (tap..charged)
+    HIT_UP_MIN: 230, HIT_UP_MAX: 430,    // upward launch (tap..charged) — more vertical
+    HIT_FWD_MIN: 18, HIT_FWD_MAX: 170,   // forward launch (tap..charged) — less horizontal
     DEAD_VX: 22,            // below this horizontal speed a grounded ball is "dead"
 
     // states the client renders
