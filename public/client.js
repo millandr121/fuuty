@@ -34,6 +34,7 @@ function handle(m) {
 // ---------------------------------------------------------------------------
 // menu / lobby
 // ---------------------------------------------------------------------------
+const buildEl = $('build'); if (buildEl) buildEl.textContent = C.BUILD;
 const nameInput = $('nameInput');
 nameInput.value = localStorage.getItem('pf_name') || '';
 const myName = () => { const n = (nameInput.value || 'player').trim().slice(0, 12) || 'player'; localStorage.setItem('pf_name', n); return n; };
@@ -170,50 +171,52 @@ function drawGoal(worldX) {
   for (let k = 0; k <= depth; k += 11) { ctx.beginPath(); ctx.moveTo(x + dir * k, top); ctx.lineTo(x + dir * k, groundY); ctx.stroke(); }
 }
 
-// ---- simple chunky pixel guy ----
-function R(c, x, y, w, h) { ctx.fillStyle = c; ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); }
+// ---- rounded little mascot ----
+function ell(c, x, y, rx, ry) { ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
 function drawPlayer(p, isMe) {
   const col = TEAM[p.team];
   const X = WX(p.x), Y = WY(p.h);
-  const ssc = Math.max(0.4, 1 - p.h / 160);
-  ctx.fillStyle = 'rgba(0,0,0,.32)'; ctx.beginPath(); ctx.ellipse(X, groundY + 2 * Z, 14 * Z * ssc, 4 * Z * ssc, 0, 0, Math.PI * 2); ctx.fill();
+  const ssc = Math.max(0.4, 1 - p.h / 140);
+  ctx.fillStyle = 'rgba(0,0,0,.30)'; ctx.beginPath(); ctx.ellipse(X, groundY + 2 * Z, 15 * Z * ssc, 4.5 * Z * ssc, 0, 0, Math.PI * 2); ctx.fill();
 
   ctx.save(); ctx.translate(X, Y); ctx.scale((p.f || 1) * Z, Z); // local = world units, forward = +x, up = -y
-  const ph = p.a * 9, sw = Math.sin(ph) * 4;
-  // default legs
-  let lfx = -5 + sw, lbx = 1 - sw, lLen = 22, frontLeg = null; // frontLeg overrides front leg pose [x,y,w,h]
-  let bob = 0, headTilt = 0, armF = 5;
+  const ph = p.a * 9, sw = Math.sin(ph) * 3.5;
+
+  // pose: feet positions [backX, frontX, frontY], body bob/lean/tilt, squash
+  let footB = -5, footF = 4, footFy = 0, bob = 0, lean = 0, tilt = 0, squash = 1, eyeUp = 0;
   switch (p.s) {
-    case C.S_RUN: bob = Math.abs(Math.sin(ph)) * 2; break;
-    case C.S_IDLE: lfx = -5; lbx = 1; bob = Math.sin(p.a * 2) * 0.8; armF = 1; break;
-    case C.S_KICK: frontLeg = [6, -8, 5, 16]; headTilt = 1; armF = -4; break;      // foot kicks up-forward
-    case C.S_KNEE: frontLeg = [3, -20, 6, 12]; headTilt = 1; armF = 7; break;       // knee raised
-    case C.S_HEAD: headTilt = -3; armF = 8; bob = 1; break;                          // heading (hop via p.h)
-    case C.S_WHIFF: frontLeg = [7, -2, 5, 20]; armF = -3; break;
-    case C.S_AIR: lfx = -3; lbx = 3; lLen = 16; armF = 8; break;
+    case C.S_RUN: footB = -5 - sw; footF = 4 + sw; bob = Math.abs(Math.sin(ph)) * 2; lean = 2; break;
+    case C.S_IDLE: { const s = Math.sin(p.a * 2.2); squash = 1 + s * 0.04; bob = Math.max(0, s) * 0.6; break; }
+    case C.S_KICK: footF = 12; footFy = -8; lean = 3; squash = 1.04; break;       // foot kicks up-forward
+    case C.S_KNEE: footF = 6; footFy = -24; lean = 1; eyeUp = -2; break;          // knee/foot raised to mid
+    case C.S_HEAD: tilt = -0.16; eyeUp = -3; squash = 1.05; break;                // header (hop via p.h)
+    case C.S_WHIFF: squash = 0.9; lean = -3; footF = 9; break;
+    case C.S_AIR: footB = -3; footF = 3; footFy = -3; break;
   }
-  ctx.translate(0, -bob);
-  // back leg
-  R(col.short, lbx, -22, 5, 11); R(col.dark, lbx, -11, 5, 11);
-  // torso
-  R(col.shirt, -7, -44, 14, 22);
-  R(col.short, -7, -26, 14, 5); // shorts band
-  // back arm
-  R(SKIN, -9, -42, 4, 12);
-  // front leg (over torso)
-  if (frontLeg) { R(col.short, frontLeg[0], frontLeg[1], frontLeg[2], frontLeg[3] * 0.5); R(col.dark, frontLeg[0], frontLeg[1] + frontLeg[3] * 0.5, frontLeg[2], frontLeg[3] * 0.5); }
-  else { R(col.short, lfx, -22, 5, 11); R(col.dark, lfx, -11, 5, 11); }
-  // front arm
-  R(SKIN, 5, -42 + Math.max(0, -armF) * 0.3, 4, 12);
-  // head
-  R(SKIN, -6, -57 - headTilt, 12, 13);
-  R(col.dark, -6, -57 - headTilt, 12, 4); // hair
-  R('#1a2530', 3, -52 - headTilt, 2, 2);  // eye (forward)
+  if (p.ch > 0.02) { squash = 0.9 - p.ch * 0.06; bob = 0; }   // crouch/anticipate while charging
+
+  ctx.translate(lean, -bob); ctx.rotate(tilt);
+  ctx.scale(2 - squash, squash);   // squash & stretch around the feet
+
+  // feet (little dark ovals)
+  ell('#22303a', footB, -3, 4, 3);
+  // body — one big rounded blob in team colour
+  ell(col.dark, 0, -23, 13, 23);          // outline-ish darker base
+  ell(col.shirt, 0, -24, 11.5, 21);       // body
+  ell('rgba(255,255,255,.16)', -3, -30, 5, 8); // soft sheen
+  // tiny stub arms
+  ell(col.shirt, -11, -22, 3.5, 5); ell(col.shirt, 11, -22, 3.5, 5);
+  // front foot (over body) — the one that juggles
+  ell('#22303a', footF, -3 + footFy, 4, 3);
+  // face: two eyes looking forward + a little smile
+  ell('#fff', -3.5, -34 + eyeUp, 3, 3.6); ell('#fff', 4.5, -34 + eyeUp, 3, 3.6);
+  ell('#1a2530', -2.5, -34 + eyeUp, 1.4, 1.8); ell('#1a2530', 5.5, -34 + eyeUp, 1.4, 1.8);
+  ctx.strokeStyle = '#7a4a2a'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(1, -27 + eyeUp, 3, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
   ctx.restore();
 
-  // charge ring while winding up
+  // charge bar while winding up
   if (p.ch > 0.02) {
-    const w = 26, x0 = X - w / 2, y0 = Y - 64 * Z;
+    const w = 28, x0 = X - w / 2, y0 = Y - 66 * Z;
     ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(x0 - 1, y0 - 1, w + 2, 6);
     ctx.fillStyle = p.ch > 0.85 ? '#ff7a7a' : '#ffd23f'; ctx.fillRect(x0, y0, w * p.ch, 4);
   }

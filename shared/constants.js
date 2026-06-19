@@ -5,6 +5,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   const C = {
     TICK_HZ: 30,
+    BUILD: 'keep-up v4',   // shown on the menu so you can confirm you have the latest
 
     // rendering — canvas fills the window; camera follows the BALL; zoom from height
     VISIBLE_WORLD_H: 260,
@@ -34,22 +35,23 @@
     STANCE_OFF: [14, 8, 2], // how far in front the strike zone sits
     STANCE_SETTLE: 1.8,     // a raised stance drifts back down after this long
 
-    // ball — bounces die quickly, rolls stop fast (no scoring from half)
+    // ball — bounces die quickly, rolls stop fast, stays low (no scoring from half,
+    // and juggling keeps it close to you rather than flying away)
     B_RADIUS: 7,
-    B_GRAVITY: 1350,
-    B_RESTITUTION: 0.34,
-    B_FRICTION: 2.7,
-    B_AIRDRAG: 0.09,
-    B_HMAX: 240,            // cap height so pops don't fly off forever
+    B_GRAVITY: 1550,
+    B_RESTITUTION: 0.3,
+    B_FRICTION: 3.0,
+    B_AIRDRAG: 0.1,
+    B_HMAX: 130,            // cap height so pops stay readable, not "flying"
 
     // the juggle hit (Space). hold longer = more power (height + distance).
     CHARGE_MAX: 0.7,        // seconds to full charge
-    HIT_RX: 30,             // horizontal reach of the strike zone
-    HIT_RH: 18,             // vertical tolerance around the stance height
+    HIT_RX: 32,             // horizontal reach of the strike zone
+    HIT_RH: 19,             // vertical tolerance around the stance height
     HIT_CD: 0.22,           // min time between hits
     WHIFF_CD: 0.3,          // recovery after a mistimed swing
-    HIT_UP_MIN: 250, HIT_UP_MAX: 470,    // upward launch (tap..charged)
-    HIT_FWD_MIN: 35, HIT_FWD_MAX: 290,   // forward launch (tap..charged)
+    HIT_UP_MIN: 190, HIT_UP_MAX: 330,    // upward launch (tap..charged) — gentler pops
+    HIT_FWD_MIN: 25, HIT_FWD_MAX: 200,   // forward launch (tap..charged)
     DEAD_VX: 22,            // below this horizontal speed a grounded ball is "dead"
 
     // states the client renders
