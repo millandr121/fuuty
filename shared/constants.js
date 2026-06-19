@@ -5,7 +5,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   const C = {
     TICK_HZ: 30,
-    BUILD: 'keep-up v8',   // shown on the menu so you can confirm you have the latest
+    BUILD: 'keep-up v9',   // shown on the menu so you can confirm you have the latest
 
     // rendering — canvas fills the window; camera follows the BALL; zoom from height
     VISIBLE_WORLD_H: 260,

@@ -213,71 +213,108 @@ function drawGoal(worldX) {
 }
 
 // ---------------------------------------------------------------------------
-// pixel-art player
+// blob mascot player — round body, oval legs, arm nubs, expressive eyes
 // ---------------------------------------------------------------------------
-// blk = a filled block with a 1u dark outline, for a chunky pixel-art read
-function blk(c, x, y, w, h) { rect(OUT, x - 1, y - 1, w + 2, h + 2); rect(c, x, y, w, h); }
 function drawPlayer(p, isMe) {
   const col = TEAM[p.team];
   const X = WX(p.x), Y = WY(p.h);
-  // shadow
+  // ground shadow
   const ssc = Math.max(0.4, 1 - p.h / 150);
   ctx.fillStyle = 'rgba(0,0,0,.30)'; ctx.beginPath(); ctx.ellipse(X, groundY + 2 * Z, 13 * Z * ssc, 4 * Z * ssc, 0, 0, Math.PI * 2); ctx.fill();
 
-  ctx.save(); ctx.translate(X, Y); ctx.scale((p.f || 1) * Z, Z); // local = world units, forward = +x, up = -y
-  const ph = p.a * 9, sw = Math.sin(ph) * 3;
+  ctx.save(); ctx.translate(X, Y); ctx.scale((p.f || 1) * Z, Z);
+  const ph = p.a * 9;
+  // defaults: back leg lx=-6, front leg rx=+4; both y-center at -6
+  let bob = 0, lean = 0, headDY = 0;
+  let lx = -6, ly = 0, rx = 4, ry = 0;
+  let alY = 0, arY = 0;    // arm vertical offsets
+  let eyeOpen = 1;          // 1=normal, <1=squint, >1=wide
+  let effort = false;       // straight mouth vs smile
 
-  // pose: front leg [hipX, kneeY, footX, footY], plus bob/lean/head
-  let bob = 0, lean = 0, headDY = 0, armFY = 0, armBY = 0;
-  let bLegX = -4 - sw, fLeg = [3 + sw, -10, 3 + sw, 0];   // [thighX, kneeY, footX, footY]
   switch (p.s) {
-    case C.S_RUN: bob = Math.abs(Math.sin(ph)) * 1.6; lean = 2; armFY = sw * 2; armBY = -sw * 2; break;
-    case C.S_IDLE: bLegX = -4; fLeg = [3, -10, 3, 0]; bob = Math.sin(p.a * 2) * 0.7; break;
-    case C.S_KICK: fLeg = [5, -9, 12, -7]; lean = 3; armFY = -4; break;     // foot kicks forward-up
-    case C.S_KNEE: fLeg = [4, -22, 5, -16]; lean = 1; armFY = 3; headDY = -1; break; // knee up to the ball
-    case C.S_HEAD: headDY = -4; lean = -2; armFY = -6; armBY = -6; bob = 1; break;   // header (hop via p.h)
-    case C.S_WHIFF: fLeg = [6, -8, 11, -2]; lean = -3; break;
-    case C.S_AIR: bLegX = -2; fLeg = [3, -13, 1, -8]; armFY = -6; armBY = -6; break;
+    case C.S_RUN:
+      bob = Math.abs(Math.sin(ph)) * 1.5; lean = 2;
+      lx -= Math.sin(ph) * 3; rx += Math.sin(ph) * 3;
+      alY = Math.sin(ph) * 4; arY = -Math.sin(ph) * 4;
+      break;
+    case C.S_IDLE: bob = Math.sin(p.a * 2) * 0.6; break;
+    case C.S_KICK:  rx = 14; ry = -9;  lean = 3;  eyeOpen = 0.5;  effort = true; break;
+    case C.S_KNEE:  rx = 5;  ry = -18; lean = 1;  eyeOpen = 0.6;  effort = true; break;
+    case C.S_HEAD:  headDY = -5; lean = -1; alY = -7; arY = -7; eyeOpen = 0.45; effort = true; break;
+    case C.S_WHIFF: rx = 12; ry = -4;  lean = -4; eyeOpen = 1.4;  break;
+    case C.S_AIR:   ly = -6; ry = -6;  alY = -4;  arY = -4;       break;
   }
-  if (p.ch > 0.02) { bob = -1; lean = -2 - p.ch * 2; }   // wind-up crouch while charging
+  if (p.ch > 0.02) { bob = -1.5 - p.ch * 2; lean = -3 - p.ch * 2; eyeOpen = 0.55; effort = true; }
   ctx.translate(lean, -bob);
 
-  // back arm (behind torso)
-  blk(SKIN_D, -8, -36 + armBY, 3, 11);
-  // back leg
-  blk(col.sock, bLegX, -10, 4, 8); blk(col.short, bLegX, -20, 4, 11); rect(OUT, bLegX - 1, -2, 6, 3); rect('#1d2630', bLegX - 1, -2, 6, 3);
-  // shorts + jersey (torso)
-  blk(col.short, -7, -24, 14, 7);
-  blk(col.shirt, -7, -40, 14, 17);
-  rect(col.dark, -7, -40, 14, 4);          // collar/shade
-  rect('rgba(255,255,255,.14)', -6, -39, 4, 14); // sheen
-  // front leg (over torso)
-  blk(col.short, fLeg[0] - 2, -20, 4, Math.max(4, -10 - fLeg[1] + 14)); // thigh down from hip
-  blk(col.sock, fLeg[2] - 2, fLeg[1], 4, Math.max(5, fLeg[3] - fLeg[1] + 10));
-  rect(OUT, fLeg[2] - 3, fLeg[3] - 1, 7, 4); rect('#222c37', fLeg[2] - 2, fLeg[3], 6, 3); // boot
-  // front arm
-  blk(SKIN, 5, -36 + armFY, 3, 11);
-  // head
-  blk(SKIN, -5, -53 + headDY, 10, 12);
-  rect(HAIR, -5, -53 + headDY, 10, 4);                 // hair
-  rect(HAIR, -5, -53 + headDY, 3, 7);                  // sideburn
-  rect(OUT, 3, -47 + headDY, 2, 2);                    // eye (forward)
-  rect(SKIN_D, 0, -43 + headDY, 4, 1);                 // mouth/jaw
+  // ── back arm nub ──
+  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(-17, -28 + alY, 6, 4.5, 0.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = col.shirt; ctx.beginPath(); ctx.ellipse(-16, -28 + alY, 5, 3.5, 0.5, 0, Math.PI * 2); ctx.fill();
+
+  // ── back leg (oval + boot) ──
+  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(lx, -6 + ly, 5, 9, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = col.sock; ctx.beginPath(); ctx.ellipse(lx, -6 + ly, 4, 8, 0, 0, Math.PI * 2); ctx.fill();
+  rect(OUT, lx - 6, ly, 11, 4); rect('#1d2630', lx - 5, ly + 1, 10, 3);
+
+  // ── body blob ──
+  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(0, -26, 20, 21, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = col.shirt; ctx.beginPath(); ctx.ellipse(0, -26, 19, 20, 0, 0, Math.PI * 2); ctx.fill();
+  // jersey stripe clipped to body outline
+  ctx.save();
+  ctx.beginPath(); ctx.ellipse(0, -26, 19, 20, 0, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = col.dark; ctx.fillRect(-20, -31, 40, 9);
+  ctx.restore();
+  // body highlight
+  ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.ellipse(-5, -36, 7, 5, -0.4, 0, Math.PI * 2); ctx.fill();
+
+  // ── front leg (oval + boot) ──
+  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(rx, -6 + ry, 5, 9, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = col.sock; ctx.beginPath(); ctx.ellipse(rx, -6 + ry, 4, 8, 0, 0, Math.PI * 2); ctx.fill();
+  rect(OUT, rx - 2, ry, 13, 4); rect('#1d2630', rx - 1, ry + 1, 12, 3);
+
+  // ── front arm nub ──
+  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(18, -28 + arY, 6, 4.5, -0.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = col.shirt; ctx.beginPath(); ctx.ellipse(17, -28 + arY, 5, 3.5, -0.5, 0, Math.PI * 2); ctx.fill();
+
+  // ── head ──
+  const hy = -51 + headDY;
+  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(1, hy, 14, 12, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#f2c878'; ctx.beginPath(); ctx.ellipse(1, hy, 13, 11, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.22)'; ctx.beginPath(); ctx.ellipse(-4, hy - 4, 5, 3.5, -0.3, 0, Math.PI * 2); ctx.fill();
+
+  // eyes — height scales with eyeOpen
+  const eRad = Math.max(0.9, eyeOpen * 3.8);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.ellipse(5, hy - 2, 3.5, eRad, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-3, hy - 2, 3.5, eRad, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#1a1028';
+  ctx.beginPath(); ctx.arc(5.5, hy - 1.5, 2.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(-2.5, hy - 1.5, 2.2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(6.1, hy - 2.5, 0.9, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(-1.9, hy - 2.5, 0.9, 0, Math.PI * 2); ctx.fill();
+
+  // mouth — straight line when concentrating, arc when happy/neutral
+  ctx.strokeStyle = '#9a6a2a'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (effort) { ctx.moveTo(-3, hy + 5); ctx.lineTo(5, hy + 5); }
+  else { ctx.arc(1, hy + 3, 3.5, 0.2, Math.PI - 0.2); }
+  ctx.stroke();
 
   ctx.restore();
 
   // charge bar
   if (p.ch > 0.02) {
-    const w = 28, x0 = X - w / 2, y0 = Y - 66 * Z;
-    rect('rgba(0,0,0,.55)', x0 - 1, y0 - 1, w + 2, 6);
-    rect(p.ch > 0.85 ? '#ff7a7a' : '#ffd23f', x0, y0, w * p.ch, 4);
+    const bw = 28, bx0 = X - bw / 2, by0 = Y - 68 * Z;
+    rect('rgba(0,0,0,.55)', bx0 - 1, by0 - 1, bw + 2, 6);
+    rect(p.ch > 0.85 ? '#ff7a7a' : '#ffd23f', bx0, by0, bw * p.ch, 4);
   }
 }
 
 const STANCE_NAME = ['FEET', 'KNEE', 'HEAD'];
 const STANCE_COL = ['#7CFFB2', '#ffd23f', '#ff7a7a'];
 function drawLabel(p, isMe) {
-  const X = WX(p.x), topY = WY(p.h) - 60 * Z;
+  const X = WX(p.x), topY = WY(p.h) - 75 * Z;
   ctx.textAlign = 'center';
   if (!p.npc) { ctx.fillStyle = isMe ? '#fff' : 'rgba(255,255,255,.75)'; ctx.font = 'bold 13px "Courier New",monospace'; ctx.fillText(p.name, X, topY); }
   if (isMe) { ctx.fillStyle = STANCE_COL[p.st]; ctx.font = 'bold 12px "Courier New",monospace'; ctx.fillText('▾ ' + STANCE_NAME[p.st], X, topY - 15); }
