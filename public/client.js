@@ -213,101 +213,83 @@ function drawGoal(worldX) {
 }
 
 // ---------------------------------------------------------------------------
-// blob mascot player — round body, oval legs, arm nubs, expressive eyes
+// creature player — one-piece round body + eyes + stubby feet & arm nubs
 // ---------------------------------------------------------------------------
 function drawPlayer(p, isMe) {
   const col = TEAM[p.team];
   const X = WX(p.x), Y = WY(p.h);
-  // ground shadow
   const ssc = Math.max(0.4, 1 - p.h / 150);
-  ctx.fillStyle = 'rgba(0,0,0,.30)'; ctx.beginPath(); ctx.ellipse(X, groundY + 2 * Z, 13 * Z * ssc, 4 * Z * ssc, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,.30)'; ctx.beginPath(); ctx.ellipse(X, groundY + 2*Z, 12*Z*ssc, 3.5*Z*ssc, 0, 0, Math.PI*2); ctx.fill();
 
-  ctx.save(); ctx.translate(X, Y); ctx.scale((p.f || 1) * Z, Z);
+  ctx.save(); ctx.translate(X, Y); ctx.scale((p.f||1)*Z, Z);
   const ph = p.a * 9;
-  // defaults: back leg lx=-6, front leg rx=+4; both y-center at -6
-  let bob = 0, lean = 0, headDY = 0;
-  let lx = -6, ly = 0, rx = 4, ry = 0;
-  let alY = 0, arY = 0;    // arm vertical offsets
-  let eyeOpen = 1;          // 1=normal, <1=squint, >1=wide
-  let effort = false;       // straight mouth vs smile
+  let bob = 0, lean = 0, sqX = 1, sqY = 1;
+  let lx = -7, ly = 0, rx = 7, ry = 0;
+  let armUp = 0, eyeOpen = 1, effort = false;
 
   switch (p.s) {
     case C.S_RUN:
-      bob = Math.abs(Math.sin(ph)) * 1.5; lean = 2;
-      lx -= Math.sin(ph) * 3; rx += Math.sin(ph) * 3;
-      alY = Math.sin(ph) * 4; arY = -Math.sin(ph) * 4;
+      bob = Math.abs(Math.sin(ph))*2; lean = 3;
+      lx = -7 + Math.sin(ph)*4; rx = 7 - Math.sin(ph)*4;
+      ly = Math.max(0, Math.sin(ph)*5); ry = Math.min(0, Math.sin(ph)*6);
       break;
-    case C.S_IDLE: bob = Math.sin(p.a * 2) * 0.6; break;
-    case C.S_KICK:  rx = 14; ry = -9;  lean = 3;  eyeOpen = 0.5;  effort = true; break;
-    case C.S_KNEE:  rx = 5;  ry = -18; lean = 1;  eyeOpen = 0.6;  effort = true; break;
-    case C.S_HEAD:  headDY = -5; lean = -1; alY = -7; arY = -7; eyeOpen = 0.45; effort = true; break;
-    case C.S_WHIFF: rx = 12; ry = -4;  lean = -4; eyeOpen = 1.4;  break;
-    case C.S_AIR:   ly = -6; ry = -6;  alY = -4;  arY = -4;       break;
+    case C.S_IDLE: bob = Math.sin(p.a*2)*0.8; break;
+    case C.S_KICK:  rx=19; ry=-12; lean=4; eyeOpen=0.45; effort=true; sqX=1.08; sqY=0.92; break;
+    case C.S_KNEE:  rx=8;  ry=-22; lean=2; eyeOpen=0.55; effort=true; break;
+    case C.S_HEAD:  lean=-2; armUp=10; eyeOpen=0.38; effort=true; sqX=0.9; sqY=1.12; break;
+    case C.S_WHIFF: rx=15; ry=-6; lean=-5; eyeOpen=1.55; sqX=1.14; sqY=0.83; break;
+    case C.S_AIR:   ly=-9; ry=-9; armUp=5; sqY=1.06; break;
   }
-  if (p.ch > 0.02) { bob = -1.5 - p.ch * 2; lean = -3 - p.ch * 2; eyeOpen = 0.55; effort = true; }
+  if (p.ch > 0.02) { bob=-2-p.ch*3; lean=-4-p.ch*2; eyeOpen=0.5; effort=true; sqX=1+p.ch*0.1; sqY=0.9-p.ch*0.06; }
   ctx.translate(lean, -bob);
 
-  // ── back arm nub ──
-  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(-17, -28 + alY, 6, 4.5, 0.5, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = col.shirt; ctx.beginPath(); ctx.ellipse(-16, -28 + alY, 5, 3.5, 0.5, 0, Math.PI * 2); ctx.fill();
+  // back foot
+  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(lx, -4+ly, 6.5, 4.5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#1e2535'; ctx.beginPath(); ctx.ellipse(lx, -4+ly, 5.5, 3.5, 0, 0, Math.PI*2); ctx.fill();
+  // back arm nub
+  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(-20, -25-armUp*0.4, 6.5, 4.5, 0.5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = col.shirt; ctx.beginPath(); ctx.ellipse(-19, -25-armUp*0.4, 5.5, 3.5, 0.5, 0, Math.PI*2); ctx.fill();
 
-  // ── back leg (oval + boot) ──
-  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(lx, -6 + ly, 5, 9, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = col.sock; ctx.beginPath(); ctx.ellipse(lx, -6 + ly, 4, 8, 0, 0, Math.PI * 2); ctx.fill();
-  rect(OUT, lx - 6, ly, 11, 4); rect('#1d2630', lx - 5, ly + 1, 10, 3);
-
-  // ── body blob ──
-  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(0, -26, 20, 21, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = col.shirt; ctx.beginPath(); ctx.ellipse(0, -26, 19, 20, 0, 0, Math.PI * 2); ctx.fill();
-  // jersey stripe clipped to body outline
-  ctx.save();
-  ctx.beginPath(); ctx.ellipse(0, -26, 19, 20, 0, 0, Math.PI * 2); ctx.clip();
-  ctx.fillStyle = col.dark; ctx.fillRect(-20, -31, 40, 9);
+  // main body (IS also the head — one round blob creature)
+  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(0, -22, 17*sqX+1.5, 20*sqY+1.5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = col.shirt; ctx.beginPath(); ctx.ellipse(0, -22, 17*sqX, 20*sqY, 0, 0, Math.PI*2); ctx.fill();
+  // jersey band clipped to body
+  ctx.save(); ctx.beginPath(); ctx.ellipse(0,-22,17*sqX,20*sqY,0,0,Math.PI*2); ctx.clip();
+  ctx.fillStyle = col.dark; ctx.fillRect(-20,-27,40,8);
   ctx.restore();
-  // body highlight
-  ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.ellipse(-5, -36, 7, 5, -0.4, 0, Math.PI * 2); ctx.fill();
+  // shine
+  ctx.fillStyle='rgba(255,255,255,.2)'; ctx.beginPath(); ctx.ellipse(-5,-33,6,4,-0.3,0,Math.PI*2); ctx.fill();
 
-  // ── front leg (oval + boot) ──
-  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(rx, -6 + ry, 5, 9, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = col.sock; ctx.beginPath(); ctx.ellipse(rx, -6 + ry, 4, 8, 0, 0, Math.PI * 2); ctx.fill();
-  rect(OUT, rx - 2, ry, 13, 4); rect('#1d2630', rx - 1, ry + 1, 12, 3);
+  // front foot
+  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(rx, -4+ry, 7.5, 5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#1e2535'; ctx.beginPath(); ctx.ellipse(rx, -4+ry, 6.5, 4, 0, 0, Math.PI*2); ctx.fill();
+  // front arm nub
+  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(21, -25-armUp, 6.5, 4.5, -0.5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = col.shirt; ctx.beginPath(); ctx.ellipse(20, -25-armUp, 5.5, 3.5, -0.5, 0, Math.PI*2); ctx.fill();
 
-  // ── front arm nub ──
-  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(18, -28 + arY, 6, 4.5, -0.5, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = col.shirt; ctx.beginPath(); ctx.ellipse(17, -28 + arY, 5, 3.5, -0.5, 0, Math.PI * 2); ctx.fill();
+  // eyes (in upper body)
+  const eyeY = -33;
+  const eRad = Math.max(0.9, eyeOpen*4.2);
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.ellipse(6,eyeY,4.5,eRad,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.ellipse(-3,eyeY,4.5,eRad,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#08051a'; ctx.beginPath(); ctx.arc(7,eyeY+0.5,2.8,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#08051a'; ctx.beginPath(); ctx.arc(-2,eyeY+0.5,2.8,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(7.8,eyeY-1,1.1,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-1.2,eyeY-1,1.1,0,Math.PI*2); ctx.fill();
 
-  // ── head ──
-  const hy = -51 + headDY;
-  ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(1, hy, 14, 12, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#f2c878'; ctx.beginPath(); ctx.ellipse(1, hy, 13, 11, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,.22)'; ctx.beginPath(); ctx.ellipse(-4, hy - 4, 5, 3.5, -0.3, 0, Math.PI * 2); ctx.fill();
-
-  // eyes — height scales with eyeOpen
-  const eRad = Math.max(0.9, eyeOpen * 3.8);
-  ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.ellipse(5, hy - 2, 3.5, eRad, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(-3, hy - 2, 3.5, eRad, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#1a1028';
-  ctx.beginPath(); ctx.arc(5.5, hy - 1.5, 2.2, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(-2.5, hy - 1.5, 2.2, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.arc(6.1, hy - 2.5, 0.9, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(-1.9, hy - 2.5, 0.9, 0, Math.PI * 2); ctx.fill();
-
-  // mouth — straight line when concentrating, arc when happy/neutral
-  ctx.strokeStyle = '#9a6a2a'; ctx.lineWidth = 1;
+  // mouth
+  ctx.strokeStyle='#5a3008'; ctx.lineWidth=1.3;
   ctx.beginPath();
-  if (effort) { ctx.moveTo(-3, hy + 5); ctx.lineTo(5, hy + 5); }
-  else { ctx.arc(1, hy + 3, 3.5, 0.2, Math.PI - 0.2); }
+  if (effort) { ctx.moveTo(-4,eyeY+10); ctx.lineTo(5,eyeY+10); }
+  else { ctx.arc(1,eyeY+7,4,0.2,Math.PI-0.2); }
   ctx.stroke();
 
   ctx.restore();
 
-  // charge bar
   if (p.ch > 0.02) {
-    const bw = 28, bx0 = X - bw / 2, by0 = Y - 68 * Z;
-    rect('rgba(0,0,0,.55)', bx0 - 1, by0 - 1, bw + 2, 6);
-    rect(p.ch > 0.85 ? '#ff7a7a' : '#ffd23f', bx0, by0, bw * p.ch, 4);
+    const bw=28, bx0=X-bw/2, by0=Y-56*Z;
+    rect('rgba(0,0,0,.55)',bx0-1,by0-1,bw+2,6);
+    rect(p.ch>0.85?'#ff7a7a':'#ffd23f',bx0,by0,bw*p.ch,4);
   }
 }
 

@@ -66,7 +66,7 @@ function newPlayer(team, isNPC, name, controllerId) {
     charging: false, chargeT: 0, hitCd: 0,
     input: { left: false, right: false, up: false, down: false, act: false },
     prev: { up: false, down: false, act: false },
-    ai: { cd: 0, stanceCd: 0, readStance: 0, readCd: 0, lazy: rand(0.1, 0.26) },
+    ai: { cd: 0, stanceCd: 0, readStance: 0, readCd: 0, lazy: rand(0.2, 0.4) },
   };
 }
 function createGame(room) {
@@ -119,7 +119,6 @@ function stepGame(game, dt) {
   if (game.flash) { game.flash.t -= dt; if (game.flash.t <= 0) game.flash = null; }
   for (const p of game.players) { if (p.isNPC) aiThink(game, p, dt); stepPlayer(game, p, dt); }
   stepBall(game, dt);
-  separate(game);
   checkGoal(game);
 }
 
@@ -259,7 +258,7 @@ function aiThink(game, p, dt) {
   // delayed, occasionally-wrong read of the ball's height (beatable)
   if (p.ai.readCd <= 0) {
     const truth = C.nearestStance(b.h);
-    p.ai.readStance = Math.random() < 0.18 ? clamp(truth + (Math.random() < 0.5 ? -1 : 1), 0, 2) : truth;
+    p.ai.readStance = Math.random() < 0.32 ? clamp(truth + (Math.random() < 0.5 ? -1 : 1), 0, 2) : truth;
     p.ai.readCd = p.ai.lazy;
   }
 
@@ -278,14 +277,14 @@ function aiThink(game, p, dt) {
 
   // attempt a touch when the ball is in range and on its way down
   const zx = p.x + dir * C.STANCE_OFF[p.stance], zh = stanceH(p.stance);
-  const inZone = absd(b.x, zx) < C.HIT_RX * 0.9 && absd(b.h, zh) < C.HIT_RH;
-  if (inZone && p.hitCd <= 0 && p.ai.cd <= 0) {
+  const inZone = absd(b.x, zx) < C.HIT_RX * 0.65 && absd(b.h, zh) < C.HIT_RH * 0.8;
+  if (inZone && p.hitCd <= 0 && p.ai.cd <= 0 && Math.random() > 0.15) {
     const distGoal = absd(goalX, p.x);
     let power;
-    if (distGoal < 240) power = rand(0.75, 1);     // close: shoot
-    else power = rand(0.35, 0.6);                   // advance with a measured touch
+    if (distGoal < 240) power = rand(0.65, 0.9);   // close: shoot (not always max)
+    else power = rand(0.28, 0.55);                   // advance with a measured touch
     doHit(game, p, power);
-    p.ai.cd = 0.12;
+    p.ai.cd = 0.28;
   }
 }
 
