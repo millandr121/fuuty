@@ -3,19 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>NIDHOGG FOOTY ⚽</title>
+  <title>KEEPIE FOOTY ⚽</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div id="app">
     <!-- MENU -->
     <div id="menu" class="screen">
-      <h1 class="logo">NIDHOGG<span>FOOTY</span></h1>
-      <p class="tag">side-on tug-of-war soccer · stances · duels · bicycle kicks</p>
+      <h1 class="logo">KEEPIE<span>FOOTY</span></h1>
+      <p class="tag">side-on keep-up keep-away · juggle · time your touch · <span id="build"></span></p>
       <div class="panel">
         <label>NAME</label>
         <input id="nameInput" maxlength="12" placeholder="player" />
-        <div class="row"><button id="btnSolo" class="big">QUICK PLAY <small>1v1 vs CPU</small></button></div>
+        <div class="row"><button id="btnPractice" class="big">PRACTICE <small>just you & the ball</small></button></div>
+        <div class="row"><button id="btnSolo">QUICK PLAY <small>1v1 vs CPU</small></button></div>
         <div class="row"><button id="btnCreate">CREATE LOBBY</button></div>
         <div class="row joinrow">
           <input id="codeInput" maxlength="4" placeholder="CODE" />
@@ -24,15 +25,14 @@
         <p id="menuErr" class="err"></p>
       </div>
       <div class="how">
-        <b>HOW TO PLAY</b>
-        <div>Push the ball to the far goal. The camera follows the ball — wherever it goes, the screen goes.</div>
-        <div>Win the ball by matching its <u>height</u>: low slide for a dribble, flying kick for a knee, header for a head.</div>
+        <b>HOW TO PLAY — keep-up keep-away</b>
+        <div>Keep the ball in the air by timing touches at the right <u>stance</u>: <b>feet</b> kick-up, <b>knee</b> pop, <b>head</b> nod. The camera follows the ball.</div>
+        <div>Tap <kbd>Space</kbd> for a gentle juggle; <b>hold</b> it to charge a bigger launch. Out-time your opponent's touch to steal it. A dead ball on the ground only comes back to life with a <b>feet</b> kick-up. Punt it past them into the goal.</div>
         <div class="ctrls">
           <span><kbd>A</kbd><kbd>D</kbd> move</span>
-          <span><kbd>W</kbd> jump</span>
-          <span><kbd>↑</kbd><kbd>↓</kbd> stance (feet/knee/head)</span>
-          <span><kbd>Space</kbd> kick / tackle</span>
-          <span><kbd>Shift</kbd> bicycle kick</span>
+          <span><kbd>W</kbd>/<kbd>↑</kbd> stance up</span>
+          <span><kbd>S</kbd>/<kbd>↓</kbd> stance down</span>
+          <span><kbd>Space</kbd> touch (hold = power)</span>
         </div>
       </div>
     </div>
@@ -55,19 +55,20 @@
     <!-- GAME -->
     <div id="game" class="screen hidden">
       <canvas id="cv" width="960" height="540"></canvas>
+      <div id="keys" class="keys">
+        <b>A</b><b>D</b> move · <b>W</b>/<b>S</b> stance (feet/knee/head) · <b>Space</b> touch — hold to charge
+      </div>
       <div id="touch" class="hidden">
         <div class="tpad left">
           <button id="tLeft" class="tbtn">◀</button>
           <button id="tRight" class="tbtn">▶</button>
         </div>
         <div class="tpad stance">
-          <button id="tUp" class="tbtn sm">▲</button>
-          <button id="tDown" class="tbtn sm">▼</button>
+          <button id="tUp" class="tbtn sm">▲ up</button>
+          <button id="tDown" class="tbtn sm">▼ dn</button>
         </div>
         <div class="tpad right">
-          <button id="tJump" class="tbtn sm">JMP</button>
-          <button id="tAct" class="tbtn">KICK</button>
-          <button id="tBike" class="tbtn">BIKE</button>
+          <button id="tAct" class="tbtn">TOUCH</button>
         </div>
       </div>
     </div>
